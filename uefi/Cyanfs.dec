@@ -1,0 +1,11 @@
+[Defines]
+  DEC_SPECIFICATION              = 0x00010005
+  PACKAGE_NAME                   = Cyanfs
+  PACKAGE_GUID                   = 39FBA2D6-6DCE-1a75-B150-017A53B4548B
+  PACKAGE_VERSION                = 0.01
+
+[Includes]
+  Include
+
+[Protocols]
+  gEfiCyanfsProtocolGuid = { 0x12ab0cf2, 0x7a9a, 0x289b, { 0xa2, 0xf1, 0x34, 0xbb, 0xc9, 0x0a, 0x24, 0x3c } }

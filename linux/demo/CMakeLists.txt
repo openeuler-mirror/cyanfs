@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.13)
+project(cyanfs LANGUAGES C)
+add_compile_options(-Wall -Werror -O2)
+add_link_options(-s)
+add_executable(cyanfs.demo demo.c)
