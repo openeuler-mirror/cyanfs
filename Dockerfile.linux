@@ -1,0 +1,86 @@
+# syntax=docker/dockerfile:1.2.1
+
+# 约定：
+# 内核目录树应放置或链接到/kdir目录
+
+ARG OS=ubuntu
+ARG VER=6.5
+
+FROM openeuler/openeuler:20.03 as openeuler-4.19
+FROM openeuler/openeuler:22.03 as openeuler-5.10
+FROM openeuler/openeuler:24.03 as openeuler-6.6
+
+FROM openeuler-$VER as openeuler-kernel
+RUN yum install -y \
+      kernel-devel git make gcc cmake
+RUN ln -s /usr/src/kernels/$(ls /usr/src/kernels/) /kdir
+
+FROM ubuntu:focal as focal
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+      make gcc git cmake
+
+FROM focal as ubuntu-pkg-5.4
+ARG PKG_VER=5.4.0-144
+FROM focal as ubuntu-pkg-5.8
+ARG PKG_VER=5.8.0-63
+FROM focal as ubuntu-pkg-5.11
+ARG PKG_VER=5.11.0-46
+FROM focal as ubuntu-pkg-5.13
+ARG PKG_VER=5.13.0-52
+FROM focal as ubuntu-pkg-5.15
+ARG PKG_VER=5.15.0-67
+
+FROM ubuntu:jammy as jammy
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+      make git gcc-12 cmake && \
+      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 0
+
+FROM jammy as ubuntu-pkg-5.19
+ARG PKG_VER=5.19.0-41
+
+FROM jammy as ubuntu-pkg-6.2
+ARG PKG_VER=6.2.0-26
+
+FROM jammy as ubuntu-pkg-6.5
+ARG PKG_VER=6.5.0-14
+
+FROM ubuntu:noble as noble
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+      make git gcc cmake
+
+FROM noble as ubuntu-pkg-6.8
+ARG PKG_VER=6.8.0-36
+
+FROM ubuntu-pkg-${VER} as ubuntu-kernel
+RUN apt-get update && apt-get install -y linux-headers-${PKG_VER}-generic
+RUN ln -s /usr/src/linux-headers-${PKG_VER}-generic /kdir
+
+FROM openeuler-kernel as openeuler-4.19
+FROM ubuntu-kernel as ubuntu-5.4
+FROM ubuntu-kernel as ubuntu-5.8
+FROM openeuler-kernel as openeuler-5.10
+FROM ubuntu-kernel as ubuntu-5.11
+FROM ubuntu-kernel as ubuntu-5.13
+FROM ubuntu-kernel as ubuntu-5.15
+FROM ubuntu-kernel as ubuntu-5.19
+FROM ubuntu-kernel as ubuntu-6.2
+FROM ubuntu-kernel as ubuntu-6.5
+FROM openeuler-kernel as openeuler-6.6
+FROM ubuntu-kernel as ubuntu-6.8
+
+FROM ${OS}-${VER} as builder
+WORKDIR /src
+ENV KDIR=/kdir
+
+FROM builder as release
+RUN --mount=type=bind,target=/src,rw make -j$(cat /proc/cpuinfo | grep processor | wc -l)
+
+FROM builder as debug
+RUN --mount=type=bind,target=/src,rw make -j$(cat /proc/cpuinfo | grep processor | wc -l) debug
+
+FROM scratch as final
+COPY --from=release /src /src
+COPY --from=debug /src /src

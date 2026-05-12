@@ -1,3 +1,32 @@
-# cyanfs
+# Cyanfs说明
 
-This component is designed for the openEuler Storage project scenario, enabling virtual disk volume management with snapshot support. It is compatible with both UEFI and Linux kernel environments, and is embedded into applications in the form of library functions, effectively enhancing the isolation and management efficiency of virtual volume storage.
+Cyanfs是一款支持COW的raw格式镜像文件存储系统
+
+* 镜像文件由一组固定长度的Extent组成，每个Extent有三种状态：
+    * Map: 已分配（写入过数据），磁盘上会对应一段与Extent等长的连续空间
+        * 写入的数据，将存放在该空间对应的偏移位置上
+        * 其它未写入数据的区域，将保留该空间原有的数据（不会主动清零）
+    * Free: 空闲
+        * 读取操作将返回全零
+        * 写入数据时:
+            1. 在磁盘上分配一段与Extent等长的连续空间
+            1. 将数据写入该空间对应的偏移位置上
+            1. 将Extent的状态修改为Map
+    * Parent: 指向祖辈镜像的Extent
+        * 读取操作将转发给祖辈的Extent
+        * 写入数据时：
+            1. 在磁盘上分配一段与Extent等长的连续空间
+            1. 将祖辈的Extent中的数据复制到新分配的空间中
+            1. 将新数据写入该空间对应的偏移位置上
+            1. 将Extent的状态修改为Map
+* 提供以下镜像文件管理接口：
+    * Create：创建镜像文件
+    * Fork：基于父镜像，创建子鏡像
+    * Rename：镜像文件重命名
+    * Truncate：修改镜像大小
+    * Delete：删除镜像
+    * Lookup：查找镜像
+    * List：遍历镜像
+* 可以将镜像文件映射为虚拟磁盘
+    * 不要试图读取未写入过数据的磁盘区域，因为其Extent未分配，实际的数据内容是不确定的
+

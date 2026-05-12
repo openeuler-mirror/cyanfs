@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -e
+
+ROOT_DIR="$(readlink -f "$(dirname "$0")")"
+pushd ${ROOT_DIR} >/dev/null
+
+while read OS VER
+do
+  DOCKER_BUILDKIT=1 docker build -f Dockerfile.linux --build-arg OS=$OS --build-arg VER=$VER .
+done < <(
+  if [ "${1}" ]; then
+    printf "%s\n" "${1}" | awk -F "-" '{printf("%s %s\n", $1, $2)}'
+  else
+    cat Dockerfile.linux | grep '\-kernel as ' | awk '{print $NF}' | awk -F "-" '{printf("%s %s\n", $1, $2)}'
+  fi
+)
+
+exit 0

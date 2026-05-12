@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -e
+
+ROOT_DIR="$(readlink -f "$(dirname "$0")")"
+pushd ${ROOT_DIR} >/dev/null
+
+DOCKER_BUILDKIT=1 docker build -f Dockerfile.uefi --target package --output type=local,dest=build/uefi .
+
+exit 0
