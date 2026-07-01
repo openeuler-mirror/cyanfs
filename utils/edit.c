@@ -15,7 +15,9 @@
 */
 
 #include <pthread.h>
+#include <pthread.h>
 #include "utils.h"
+#include "../linux/include/cyanfs.h"
 
 struct disk {
 	int fd;
