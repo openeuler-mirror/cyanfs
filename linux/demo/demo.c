@@ -135,7 +135,9 @@ static int do_map(int argc, const char *argv[])
 	r = parse_dev(argv[0], &map.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(map.dev, name, &meta);
 	if (r < 0)
 		return r;
@@ -158,7 +160,9 @@ static int do_unmap(int argc, const char *argv[])
 	r = parse_dev(argv[0], &unmap.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(unmap.dev, name, &meta);
 	if (r < 0)
 		return r;
@@ -218,7 +222,9 @@ static int do_file_create(int argc, const char *argv[])
 	r = parse_dev(argv[0], &create.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&create.name), argv[1]);
+	r = cyanfs_file_name_copy(&create.name, argv[1]);
+	if (r < 0)
+		return r;
 	if (ioctl(fd, CYANFS_IOCTL_FILE_CREATE, &create) < 0)
 		return -errno;
 	return 0;
@@ -235,12 +241,16 @@ static int do_file_fork(int argc, const char *argv[])
 	r = parse_dev(argv[0], &fork.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(fork.dev, name, &meta);
 	if (r < 0)
 		return r;
 	fork.pid = meta.id;
-	strcpy((char *)(&fork.name), argv[2]);
+	r = cyanfs_file_name_copy(&fork.name, argv[2]);
+	if (r < 0)
+		return r;
 	if (ioctl(fd, CYANFS_IOCTL_FILE_FORK, &fork) < 0)
 		return -errno;
 	return 0;
@@ -257,12 +267,16 @@ static int do_file_rename(int argc, const char *argv[])
 	r = parse_dev(argv[0], &rename.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(rename.dev, name, &meta);
 	if (r < 0)
 		return r;
 	rename.id = meta.id;
-	strcpy((char *)(&rename.name), argv[2]);
+	r = cyanfs_file_name_copy(&rename.name, argv[2]);
+	if (r < 0)
+		return r;
 	if (ioctl(fd, CYANFS_IOCTL_FILE_RENAME, &rename) < 0)
 		return -errno;
 	return 0;
@@ -279,7 +293,9 @@ static int do_file_truncate(int argc, const char *argv[])
 	r = parse_dev(argv[0], &truncate.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(truncate.dev, name, &meta);
 	if (r < 0)
 		return r;
@@ -303,7 +319,9 @@ static int do_file_delete(int argc, const char *argv[])
 	r = parse_dev(argv[0], &delete.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(delete.dev, name, &meta);
 	if (r < 0)
 		return r;
@@ -324,7 +342,9 @@ static int do_file_stat(int argc, const char *argv[])
 	r = parse_dev(argv[0], &stat.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(stat.dev, name, &meta);
 	if (r < 0)
 		return r;
@@ -350,7 +370,9 @@ static int do_file_read(int argc, const char *argv[])
 	r = parse_dev(argv[0], &bind.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(bind.dev, name, &meta);
 	if (r < 0)
 		return r;
@@ -389,7 +411,9 @@ static int do_file_write(int argc, const char *argv[])
 	r = parse_dev(argv[0], &bind.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(bind.dev, name, &meta);
 	if (r < 0)
 		return r;
@@ -433,7 +457,9 @@ static int do_file_import(int argc, const char *argv[])
 	if (r < 0)
 		return r;
 	memcpy(&truncate.dev, &bind.dev, sizeof(bind.dev));
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	f = open(argv[2], O_RDONLY);
 	if (f < 0)
 		return -errno;
@@ -485,7 +511,9 @@ static int do_file_extents(int argc, const char *argv[])
 	r = parse_dev(argv[0], &bind.dev);
 	if (r < 0)
 		return r;
-	strcpy((char *)(&name), argv[1]);
+	r = cyanfs_file_name_copy(&name, argv[1]);
+	if (r < 0)
+		return r;
 	r = __do_file_lookup(bind.dev, name, &meta);
 	if (r < 0)
 		return r;

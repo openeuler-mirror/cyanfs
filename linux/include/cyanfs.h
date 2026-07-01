@@ -18,10 +18,14 @@
 
 #ifdef __KERNEL__
 #include <linux/ioctl.h>
+#include <linux/errno.h>
+#include <linux/string.h>
 #include "../../core/core.h"
 #else
+#include <errno.h>
 #include <sys/ioctl.h>
 #include <stdint.h>
+#include <string.h>
 #endif
 
 #ifdef __cplusplus
@@ -73,6 +77,22 @@ struct cyanfs_super_meta {
 	uint32_t files;
 };
 #endif
+
+static inline int cyanfs_file_name_copy(cyanfs_file_name_t *dst, const char *src)
+{
+	size_t len;
+
+	if (!dst || !src)
+		return -EINVAL;
+
+	len = strnlen(src, sizeof(dst->data) + 1);
+	if (len > sizeof(dst->data))
+		return -ENAMETOOLONG;
+
+	memset(dst, 0, sizeof(*dst));
+	memcpy(dst->data, src, len);
+	return 0;
+}
 
 struct cyanfs_dev {
 	uint32_t major;
