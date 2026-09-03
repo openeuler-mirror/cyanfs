@@ -15,7 +15,9 @@
 */
 
 #include <pthread.h>
+#include <pthread.h>
 #include "utils.h"
+#include "../linux/include/cyanfs.h"
 
 struct disk {
 	int fd;
@@ -165,7 +167,9 @@ static int do_create(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 1)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_create(disk->super, name, NULL);
 	if (r < 0)
 		return r;
@@ -179,8 +183,12 @@ static int do_fork(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 2)
 		return -EINVAL;
-	strcpy((char *)(&from), argv[0]);
-	strcpy((char *)(&to), argv[1]);
+	r = cyanfs_file_name_copy(&from, argv[0]);
+	if (r < 0)
+		return r;
+	r = cyanfs_file_name_copy(&to, argv[1]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, from, &meta);
 	if (r < 0)
 		return r;
@@ -197,8 +205,12 @@ static int do_rename(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 2)
 		return -EINVAL;
-	strcpy((char *)(&from), argv[0]);
-	strcpy((char *)(&to), argv[1]);
+	r = cyanfs_file_name_copy(&from, argv[0]);
+	if (r < 0)
+		return r;
+	r = cyanfs_file_name_copy(&to, argv[1]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, from, &meta);
 	if (r < 0)
 		return r;
@@ -216,7 +228,9 @@ static int do_truncate(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 2)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, name, &meta);
 	if (r < 0)
 		return r;
@@ -235,7 +249,9 @@ static int do_delete(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 1)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, name, &meta);
 	if (r < 0)
 		return r;
@@ -254,7 +270,9 @@ static int do_extents(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 1)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, name, &meta);
 	if (r < 0)
 		return r;
@@ -374,7 +392,9 @@ static int do_read(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 2)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, name, &meta);
 	if (r < 0)
 		return r;
@@ -419,7 +439,9 @@ static int do_write(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 2)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, name, &meta);
 	if (r < 0)
 		return r;
@@ -467,7 +489,9 @@ static int __do_fill(struct disk *disk, int v, int argc, const char *argv[])
 	memset(buffer, v, CYANFS_EXTENT_SIZE);
 	if (argc < 3)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, name, &meta);
 	if (r < 0)
 		return r;
@@ -522,7 +546,9 @@ static int __do_check(struct disk *disk, int v, int argc, const char *argv[])
 	memset(compare, v, CYANFS_EXTENT_SIZE);
 	if (argc < 3)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, name, &meta);
 	if (r < 0)
 		return r;
@@ -578,7 +604,9 @@ static int do_discard(struct disk *disk, int argc, const char *argv[])
 	int r;
 	if (argc < 3)
 		return -EINVAL;
-	strcpy((char *)(&name), argv[0]);
+	r = cyanfs_file_name_copy(&name, argv[0]);
+	if (r < 0)
+		return r;
 	r = cyanfs_lookup(disk->super, name, &meta);
 	if (r < 0)
 		return r;

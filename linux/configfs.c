@@ -57,7 +57,9 @@ struct config_group *cyanfs_make_block_device(struct cyanfs_backend *backend, co
 	struct cyanfs_file_meta meta;
 	int error;
 
-	strcpy((char *)(&filename), name);
+	error = cyanfs_file_name_copy(&filename, name);
+	if (error < 0)
+		goto out;
 	error = cyanfs_lookup(backend->super, filename, &meta);
 	if (error < 0)
 		goto out;
@@ -146,14 +148,44 @@ static ssize_t cyanfs_backend_cmd_list_show(struct config_item *item, char *page
 
 CONFIGFS_ATTR_RO(cyanfs_backend_cmd_, list);
 
+static int cyanfs_configfs_is_space(char c)
+{
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+static int cyanfs_configfs_next_name(const char **cursor, cyanfs_file_name_t *name)
+{
+	const char *start;
+	size_t len;
+
+	while (**cursor && cyanfs_configfs_is_space(**cursor))
+		(*cursor)++;
+	if (!**cursor)
+		return -EINVAL;
+
+	start = *cursor;
+	while (**cursor && !cyanfs_configfs_is_space(**cursor))
+		(*cursor)++;
+
+	len = *cursor - start;
+	if (len > sizeof(name->data))
+		return -ENAMETOOLONG;
+
+	memset(name, 0, sizeof(*name));
+	memcpy(name->data, start, len);
+	return 0;
+}
+
 static ssize_t cyanfs_backend_cmd_create_store(struct config_item *item, const char *page, size_t count)
 {
 	struct cyanfs_backend *backend = to_backend(item);
 	cyanfs_file_name_t name = { 0 };
+	const char *cursor = page;
 	int r;
 
-	if (sscanf(page, "%s", (char *)(&name)) != 1)
-		return -EINVAL;
+	r = cyanfs_configfs_next_name(&cursor, &name);
+	if (r < 0)
+		return r;
 
 	r = cyanfs_create(backend->super, name, NULL);
 	if (r < 0)
@@ -168,10 +200,15 @@ static ssize_t cyanfs_backend_cmd_fork_store(struct config_item *item, const cha
 	struct cyanfs_backend *backend = to_backend(item);
 	cyanfs_file_name_t from = { 0 }, to = { 0 };
 	struct cyanfs_file_meta meta;
+	const char *cursor = page;
 	int r;
 
-	if (sscanf(page, "%s %s", (char *)(&from), (char *)(&to)) != 2)
-		return -EINVAL;
+	r = cyanfs_configfs_next_name(&cursor, &from);
+	if (r < 0)
+		return r;
+	r = cyanfs_configfs_next_name(&cursor, &to);
+	if (r < 0)
+		return r;
 
 	r = cyanfs_lookup(backend->super, from, &meta);
 	if (r < 0)
@@ -189,10 +226,15 @@ static ssize_t cyanfs_backend_cmd_rename_store(struct config_item *item, const c
 	struct cyanfs_backend *backend = to_backend(item);
 	cyanfs_file_name_t from = { 0 }, to = { 0 };
 	struct cyanfs_file_meta meta;
+	const char *cursor = page;
 	int r;
 
-	if (sscanf(page, "%s %s", (char *)(&from), (char *)(&to)) != 2)
-		return -EINVAL;
+	r = cyanfs_configfs_next_name(&cursor, &from);
+	if (r < 0)
+		return r;
+	r = cyanfs_configfs_next_name(&cursor, &to);
+	if (r < 0)
+		return r;
 
 	r = cyanfs_lookup(backend->super, from, &meta);
 	if (r < 0)
@@ -210,10 +252,14 @@ static ssize_t cyanfs_backend_cmd_truncate_store(struct config_item *item, const
 	struct cyanfs_backend *backend = to_backend(item);
 	cyanfs_file_name_t name = { 0 };
 	struct cyanfs_file_meta meta;
+	const char *cursor = page;
 	uint64_t size;
 	int r;
 
-	if (sscanf(page, "%s %llu", (char *)(&name), &size) != 2)
+	r = cyanfs_configfs_next_name(&cursor, &name);
+	if (r < 0)
+		return r;
+	if (sscanf(cursor, "%llu", &size) != 1)
 		return -EINVAL;
 
 	r = cyanfs_lookup(backend->super, name, &meta);
@@ -232,10 +278,12 @@ static ssize_t cyanfs_backend_cmd_delete_store(struct config_item *item, const c
 	struct cyanfs_backend *backend = to_backend(item);
 	cyanfs_file_name_t name = { 0 };
 	struct cyanfs_file_meta meta;
+	const char *cursor = page;
 	int r;
 
-	if (sscanf(page, "%s", (char *)(&name)) != 1)
-		return -EINVAL;
+	r = cyanfs_configfs_next_name(&cursor, &name);
+	if (r < 0)
+		return r;
 
 	r = cyanfs_lookup(backend->super, name, &meta);
 	if (r < 0)
