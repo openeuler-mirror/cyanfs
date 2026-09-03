@@ -157,7 +157,7 @@ static inline uint16_t cyanfs_get16(uint8_t **p)
 {
 	uint16_t v;
 	cyanfs_get_generic(p, &v, sizeof(v));
-	return cyanfs_le64toh(v);
+	return cyanfs_le16toh(v);
 }
 
 static inline void cyanfs_put8(uint8_t **p, uint8_t v)
