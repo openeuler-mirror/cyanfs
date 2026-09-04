@@ -19,7 +19,7 @@ cyanfs_status cyanfs_read(struct cyanfs_file *f, void *ctx, uint64_t f_off, uint
 {
 	struct cyanfs_super *s = f->super;
 
-	if (!len || f_off + len > f->meta.size)
+	if (!len || f_off > f->meta.size || len > f->meta.size - f_off)
 		return -CYANFS_ERR_INVAL;
 
 	while (len) {
@@ -91,7 +91,9 @@ cyanfs_status cyanfs_write(struct cyanfs_file *f, void *ctx, uint64_t f_off, uin
 	struct cyanfs_super *s = f->super;
 	int new_journal = 0;
 
-	if (!len || f_off + len > f->meta.size || f->open_type != CYANFS_FILE_READWRITE)
+	if (!len || f->open_type != CYANFS_FILE_READWRITE)
+		return -CYANFS_ERR_INVAL;
+	if (f_off > f->meta.size || len > f->meta.size - f_off)
 		return -CYANFS_ERR_INVAL;
 
 	while (len) {
@@ -224,7 +226,9 @@ cyanfs_status cyanfs_discard(struct cyanfs_file *f, void *ctx, uint64_t f_off, u
 	struct cyanfs_super *s = f->super;
 	int new_journal = 0;
 
-	if (!len || f_off + len > f->meta.size || f->open_type != CYANFS_FILE_READWRITE)
+	if (!len || f->open_type != CYANFS_FILE_READWRITE)
+		return -CYANFS_ERR_INVAL;
+	if (f_off > f->meta.size || len > f->meta.size - f_off)
 		return -CYANFS_ERR_INVAL;
 
 	while (len) {
