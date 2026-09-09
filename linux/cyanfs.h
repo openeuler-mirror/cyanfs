@@ -71,7 +71,9 @@ struct cyanfs_backend {
 	struct kref ref;
 	struct cyanfs_super *super;
 	dev_t dev_id;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	struct file *dev_file;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 	struct bdev_handle *dev_handle;
 #endif
 	struct block_device *dev;

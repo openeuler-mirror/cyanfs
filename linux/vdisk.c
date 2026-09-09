@@ -219,6 +219,20 @@ struct cyanfs_block_device *cyanfs_block_device_alloc(struct cyanfs_backend *bac
 {
 	int error;
 	struct cyanfs_block_device *cbd;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+	struct request_queue *backend_queue = bdev_get_queue(backend->dev);
+	struct queue_limits limits = {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
+		.features = BLK_FEAT_WRITE_CACHE,
+#endif
+		.max_hw_sectors = queue_max_hw_sectors(backend_queue),
+		.physical_block_size = bdev_physical_block_size(backend->dev),
+		.logical_block_size = SECTOR_SIZE,
+		.max_hw_discard_sectors = CYANFS_EXTENT_SIZE >> SECTOR_SHIFT,
+		.discard_granularity = CYANFS_EXTENT_SIZE,
+		.dma_alignment = queue_dma_alignment(backend_queue),
+	};
+#endif
 
 	cbd = kzalloc(sizeof(struct cyanfs_block_device), GFP_KERNEL);
 	if (!cbd) {
@@ -244,11 +258,25 @@ struct cyanfs_block_device *cyanfs_block_device_alloc(struct cyanfs_backend *bac
 		goto file_out;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+	cbd->disk = blk_alloc_disk(&limits, NUMA_NO_NODE);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	cbd->disk = blk_alloc_disk(NULL, NUMA_NO_NODE);
+#else
 	cbd->disk = blk_alloc_disk(NUMA_NO_NODE);
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	if (IS_ERR(cbd->disk)) {
+		error = PTR_ERR(cbd->disk);
+		goto file_out;
+	}
+#else
 	if (!cbd->disk) {
 		error = -ENOMEM;
 		goto file_out;
 	}
+#endif
 
 	cbd->disk->major = cyanfs_major;
 	cbd->disk->first_minor = cbd->id * DISK_MAX_PARTS;
@@ -258,14 +286,18 @@ struct cyanfs_block_device *cyanfs_block_device_alloc(struct cyanfs_backend *bac
 	snprintf(cbd->disk->disk_name, sizeof(cbd->disk->disk_name), CYANFS_DEVNAME "%d", cbd->id);
 	set_capacity(cbd->disk, cyanfs_size(cbd->file) >> SECTOR_SHIFT);
 	set_disk_ro(cbd->disk, !write);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 	blk_queue_flag_set(QUEUE_FLAG_NONROT, cbd->disk->queue);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
 	blk_queue_physical_block_size(cbd->disk->queue, bdev_physical_block_size(backend->dev));
 	blk_queue_logical_block_size(cbd->disk->queue, SECTOR_SIZE);
-	blk_queue_write_cache(cbd->disk->queue, true, false);
 	blk_queue_max_hw_sectors(cbd->disk->queue, queue_max_hw_sectors(bdev_get_queue(backend->dev)));
 	blk_queue_dma_alignment(cbd->disk->queue, queue_dma_alignment(bdev_get_queue(backend->dev)));
 	cbd->disk->queue->limits.discard_granularity = CYANFS_EXTENT_SIZE;
 	blk_queue_max_discard_sectors(cbd->disk->queue, CYANFS_EXTENT_SIZE >> SECTOR_SHIFT);
+#endif
+	blk_queue_write_cache(cbd->disk->queue, true, false);
+#endif
 
 	error = 0;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
