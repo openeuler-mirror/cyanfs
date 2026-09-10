@@ -134,6 +134,11 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 		if (h.seq != t->cursor->seq)
 			break;
 
+		if (!h.count) {
+			CYANFS_DEBUG("journal entry count is zero");
+			goto error;
+		}
+
 		record_end = p + h.size;
 		p += CYANFS_JOURNAL_HEADER_SIZE;
 		for (i = 0; i < h.count; i++) {
