@@ -99,15 +99,20 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 	struct cyanfs_journal_header h;
 	struct cyanfs_journal_entry j;
 	uint64_t offset_in_page = 0;
+	uint8_t *page_end;
 
 	if (err)
 		goto error;
 
+	page_end = (uint8_t *)base->read.buf + base->read.len;
+
 	for (;;) {
 		int i;
 		uint8_t *p = t->cursor->page + offset_in_page;
+		uint8_t *record_end;
 
-		cyanfs_journal_decode_header(p, &h);
+		if (p >= page_end || cyanfs_journal_decode_header_checked(p, page_end - p, &h))
+			break;
 		CYANFS_DEBUG("parse journal from: %" PRIu32 ":%" PRIu64 " len: %" PRIu64 " count: %" PRIu32
 			     " seq: %" PRIu64,
 			     t->cursor->extent_id, t->cursor->extent_off, h.size, h.count, h.seq);
@@ -115,8 +120,8 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 		    t->cursor->extent_off + h.size > CYANFS_EXTENT_SIZE)
 			break;
 
-		if (h.size + offset_in_page > CYANFS_JOURNAL_PAGE_SIZE) {
-			uint64_t ready = CYANFS_JOURNAL_PAGE_SIZE - offset_in_page;
+		if (h.size > (uint64_t)(page_end - p)) {
+			uint64_t ready = page_end - p;
 			cyanfs_memcpy(t->cursor->page, p, ready);
 			cyanfs_journal_loader_read_page(t, ready);
 			return;
@@ -129,9 +134,13 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 		if (h.seq != t->cursor->seq)
 			break;
 
+		record_end = p + h.size;
 		p += CYANFS_JOURNAL_HEADER_SIZE;
 		for (i = 0; i < h.count; i++) {
-			cyanfs_journal_decode_entry(&p, &j);
+			if (cyanfs_journal_decode_entry_checked(&p, record_end, &j)) {
+				CYANFS_DEBUG("journal entry decode error");
+				goto error;
+			}
 			cyanfs_journal_dump_entry(&j);
 			if (j.type != CYANFS_JOURNAL_NEXT) {
 				if (t->operations.parser(t, &j)) {
