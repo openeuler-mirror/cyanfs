@@ -55,18 +55,17 @@ static void cyanfs_journal_loader_end(struct cyanfs_task_journal_loader *t, int 
 
 static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_status err);
 
-static void cyanfs_journal_loader_read_page(struct cyanfs_task_journal_loader *t, uint64_t ready)
+static void cyanfs_journal_loader_read_page(struct cyanfs_task_journal_loader *t)
 {
 	struct cyanfs_super *s = t->base.super;
 
-	CYANFS_DEBUG_BUG_ON(ready > CYANFS_JOURNAL_PAGE_SIZE);
-	CYANFS_DEBUG_BUG_ON(t->cursor->extent_off + ready > CYANFS_EXTENT_SIZE);
+	CYANFS_DEBUG_BUG_ON(t->cursor->extent_off > CYANFS_EXTENT_SIZE);
 	cyanfs_task_init(s, &t->base, CYANFS_TASK_READ, cyanfs_journal_loader_parser_page);
-	t->base.read.buf = t->cursor->page + ready;
-	t->base.read.b_off = cyanfs_map_extent_offset(t->cursor->extent_id, t->cursor->extent_off) + ready;
-	t->base.read.len = CYANFS_EXTENT_SIZE - t->cursor->extent_off - ready;
-	if (t->base.read.len > CYANFS_JOURNAL_PAGE_SIZE - ready)
-		t->base.read.len = CYANFS_JOURNAL_PAGE_SIZE - ready;
+	t->base.read.buf = t->cursor->page;
+	t->base.read.b_off = cyanfs_map_extent_offset(t->cursor->extent_id, t->cursor->extent_off);
+	t->base.read.len = CYANFS_EXTENT_SIZE - t->cursor->extent_off;
+	if (t->base.read.len > CYANFS_JOURNAL_PAGE_SIZE)
+		t->base.read.len = CYANFS_JOURNAL_PAGE_SIZE;
 
 	cyanfs_super_task_add_tail(&t->base);
 }
@@ -90,7 +89,7 @@ static void cyanfs_journal_loader_read_extent(struct cyanfs_task_journal_loader 
 	t->cursor->extent_off = 0;
 	t->cursor->extent_id = b_id;
 
-	cyanfs_journal_loader_read_page(t, 0);
+	cyanfs_journal_loader_read_page(t);
 }
 
 static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_status err)
@@ -121,9 +120,9 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 			break;
 
 		if (h.size > (uint64_t)(page_end - p)) {
-			uint64_t ready = page_end - p;
-			cyanfs_memcpy(t->cursor->page, p, ready);
-			cyanfs_journal_loader_read_page(t, ready);
+			if (!offset_in_page)
+				break;
+			cyanfs_journal_loader_read_page(t);
 			return;
 		}
 
@@ -168,7 +167,7 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 		offset_in_page += h.size;
 
 		if (offset_in_page == CYANFS_JOURNAL_PAGE_SIZE) {
-			cyanfs_journal_loader_read_page(t, 0);
+			cyanfs_journal_loader_read_page(t);
 			return;
 		}
 	}
