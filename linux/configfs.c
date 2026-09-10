@@ -50,7 +50,7 @@ static struct config_item_type cyanfs_block_device_item_type = {
 	.ct_item_ops = &cyanfs_block_device_item_ops,
 };
 
-struct config_group *cyanfs_make_block_device(struct cyanfs_backend *backend, const char *name, int write)
+static struct config_group *cyanfs_make_block_device(struct cyanfs_backend *backend, const char *name, int write)
 {
 	struct cyanfs_block_device *cbd;
 	cyanfs_file_name_t filename = { 0 };
@@ -76,13 +76,13 @@ out:
 	return ERR_PTR(error);
 }
 
-struct config_group *cyanfs_make_block_device_ro(struct config_group *group, const char *name)
+static struct config_group *cyanfs_make_block_device_ro(struct config_group *group, const char *name)
 {
 	struct cyanfs_backend *backend = container_of(group, struct cyanfs_backend, devices_ro_group);
 	return cyanfs_make_block_device(backend, name, 0);
 }
 
-struct config_group *cyanfs_make_block_device_rw(struct config_group *group, const char *name)
+static struct config_group *cyanfs_make_block_device_rw(struct config_group *group, const char *name)
 {
 	struct cyanfs_backend *backend = container_of(group, struct cyanfs_backend, devices_rw_group);
 	return cyanfs_make_block_device(backend, name, 1);
@@ -367,7 +367,7 @@ static int cyanfs_lookup_bdev(const char *path, dev_t *dev)
 #endif
 }
 
-struct config_group *cyanfs_make_backend(struct config_group *group, const char *name)
+static struct config_group *cyanfs_make_backend(struct config_group *group, const char *name)
 {
 	int error;
 	dev_t dev = 0;

@@ -163,7 +163,7 @@ extern cyanfs_status cyanfs_truncate(struct cyanfs_super *s, cyanfs_file_id_t id
 extern cyanfs_status cyanfs_delete(struct cyanfs_super *s, cyanfs_file_id_t id);
 extern void cyanfs_close(struct cyanfs_file *f);
 
-const static struct cyanfs_file_meta cyanfs_list_init_iter = { 0 };
+static const struct cyanfs_file_meta cyanfs_list_init_iter = { 0 };
 extern cyanfs_status cyanfs_list(struct cyanfs_super *s, struct cyanfs_file_meta *iter);
 extern cyanfs_status cyanfs_lookup(struct cyanfs_super *s, cyanfs_file_name_t name, struct cyanfs_file_meta *meta);
 

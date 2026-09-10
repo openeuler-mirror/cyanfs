@@ -33,6 +33,7 @@ module_param(debug_dump_journal, int, 0644);
 #endif
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_DESCRIPTION("CyanFS block device driver");
 MODULE_VERSION(GIT_COMMIT_STRING);
 
 #define CYANFS_FLUSH_INTERVAL (60 * HZ)
