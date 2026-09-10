@@ -152,6 +152,9 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 					CYANFS_DEBUG("journal entry error");
 					goto error;
 				}
+			} else if (i != h.count - 1) {
+				CYANFS_DEBUG("journal NEXT entry is not last");
+				goto error;
 			} else if (j.next.backend != t->end_id) {
 				cyanfs_journal_loader_read_extent(t, j.next.backend);
 				return;
