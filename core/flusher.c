@@ -136,7 +136,14 @@ static void cyanfs_super_flusher_before_flush(struct cyanfs_task *t, cyanfs_stat
 static void cyanfs_super_flusher_write_error(struct cyanfs_task_journal_writer *writer)
 {
 	struct cyanfs_super *s = writer->base.super;
+
 	cyanfs_super_mark_error(s);
+	while (!cyanfs_list_empty(&writer->head)) {
+		struct cyanfs_journal_entry *j =
+			cyanfs_list_first_entry(&writer->head, struct cyanfs_journal_entry, list);
+		cyanfs_list_del(&j->list);
+		cyanfs_journal_free(j);
+	}
 }
 
 static void cyanfs_super_flusher_flush_before_write(struct cyanfs_task_journal_writer *writer)
