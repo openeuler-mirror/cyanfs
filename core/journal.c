@@ -189,6 +189,10 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 			CYANFS_DEBUG("journal record ends extent without NEXT");
 			goto error;
 		}
+		if (info.regular_count > ~(cyanfs_journal_seq_t)0 - t->cursor->seq) {
+			CYANFS_DEBUG("journal sequence overflow");
+			goto error;
+		}
 
 		p = info.entries;
 		for (i = 0; i < h.count; i++) {
@@ -386,6 +390,10 @@ static void cyanfs_journal_writer_encode(struct cyanfs_task *base, cyanfs_status
 	}
 	if (!regular_count) {
 		CYANFS_INFO("journal record cannot fit an entry.");
+		goto error;
+	}
+	if (regular_count > ~(cyanfs_journal_seq_t)0 - t->cursor->seq) {
+		CYANFS_INFO("journal sequence overflow.");
 		goto error;
 	}
 
