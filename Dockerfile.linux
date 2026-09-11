@@ -7,18 +7,25 @@ ARG OS=ubuntu
 ARG VER=6.5
 
 FROM openeuler/openeuler:20.03 as openeuler-4.19
+ARG PKG_VER=4.19.90-2608.6.0.0388.oe2003sp4.x86_64
 FROM openeuler/openeuler:22.03 as openeuler-5.10
+ARG PKG_VER=5.10.0-331.0.0.232.oe2203sp4.x86_64
 FROM openeuler/openeuler:24.03 as openeuler-6.6
+ARG PKG_VER=6.6.0-159.4.12.166.oe2403sp4.x86_64
 
 FROM openeuler-$VER as openeuler-kernel
-RUN yum install -y \
-      kernel-devel git make gcc cmake
-RUN ln -s /usr/src/kernels/$(ls /usr/src/kernels/) /kdir
+RUN dnf install -y \
+      "kernel-devel-${PKG_VER}" \
+      git make gcc binutils && \
+    test -d "/usr/src/kernels/${PKG_VER}" && \
+    ln -s "/usr/src/kernels/${PKG_VER}" /kdir && \
+    dnf clean all
 
 FROM ubuntu:focal as focal
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-      make gcc git cmake
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential git bc && \
+    rm -rf /var/lib/apt/lists/*
 
 FROM focal as ubuntu-pkg-5.4
 ARG PKG_VER=5.4.0-144
@@ -33,30 +40,50 @@ ARG PKG_VER=5.15.0-67
 
 FROM ubuntu:jammy as jammy
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-      make git gcc-12 cmake && \
-      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 0
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends make git gcc gcc-12 binutils bc && \
+    rm -rf /var/lib/apt/lists/*
 
 FROM jammy as ubuntu-pkg-5.19
 ARG PKG_VER=5.19.0-41
-
+ENV CC=gcc-11
 FROM jammy as ubuntu-pkg-6.2
 ARG PKG_VER=6.2.0-26
-
+ENV CC=gcc-11
 FROM jammy as ubuntu-pkg-6.5
 ARG PKG_VER=6.5.0-14
+ENV CC=gcc-12
 
 FROM ubuntu:noble as noble
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-      make git gcc cmake
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential git bc && \
+    rm -rf /var/lib/apt/lists/*
 
 FROM noble as ubuntu-pkg-6.8
-ARG PKG_VER=6.8.0-36
+ARG PKG_VER=6.8.0-139
+FROM noble as ubuntu-pkg-6.11
+ARG PKG_VER=6.11.0-29
+FROM noble as ubuntu-pkg-6.14
+ARG PKG_VER=6.14.0-37
+FROM noble as ubuntu-pkg-6.17
+ARG PKG_VER=6.17.0-42
+
+FROM ubuntu:resolute as resolute
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential git bc && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM resolute as ubuntu-pkg-7.0
+ARG PKG_VER=7.0.0-31
 
 FROM ubuntu-pkg-${VER} as ubuntu-kernel
-RUN apt-get update && apt-get install -y linux-headers-${PKG_VER}-generic
-RUN ln -s /usr/src/linux-headers-${PKG_VER}-generic /kdir
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends "linux-headers-${PKG_VER}-generic" && \
+    ln -s "/usr/src/linux-headers-${PKG_VER}-generic" /kdir && \
+    test -f /kdir/Makefile && \
+    rm -rf /var/lib/apt/lists/*
 
 FROM openeuler-kernel as openeuler-4.19
 FROM ubuntu-kernel as ubuntu-5.4
@@ -70,16 +97,26 @@ FROM ubuntu-kernel as ubuntu-6.2
 FROM ubuntu-kernel as ubuntu-6.5
 FROM openeuler-kernel as openeuler-6.6
 FROM ubuntu-kernel as ubuntu-6.8
+FROM ubuntu-kernel as ubuntu-6.11
+FROM ubuntu-kernel as ubuntu-6.14
+FROM ubuntu-kernel as ubuntu-6.17
+FROM ubuntu-kernel as ubuntu-7.0
 
 FROM ${OS}-${VER} as builder
 WORKDIR /src
 ENV KDIR=/kdir
 
 FROM builder as release
-RUN --mount=type=bind,target=/src,rw make -j$(cat /proc/cpuinfo | grep processor | wc -l)
+RUN --mount=type=bind,target=/src,rw \
+    test -d .git && \
+    git rev-parse --verify HEAD >/dev/null && \
+    make -C linux -j"$(nproc)" release
 
 FROM builder as debug
-RUN --mount=type=bind,target=/src,rw make -j$(cat /proc/cpuinfo | grep processor | wc -l) debug
+RUN --mount=type=bind,target=/src,rw \
+    test -d .git && \
+    git rev-parse --verify HEAD >/dev/null && \
+    make -C linux -j"$(nproc)" debug
 
 FROM scratch as final
 COPY --from=release /src /src

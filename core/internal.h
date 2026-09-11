@@ -253,7 +253,7 @@ static inline void cyanfs_super_flush_new_journal(struct cyanfs_super *s)
 void __cyanfs_super_discard_extent(struct cyanfs_super *s, struct cyanfs_extent_node *n,
 				   struct cyanfs_backend_extents_rb *root);
 
-static void inline __cyanfs_super_stat_add(struct cyanfs_super *s, struct cyanfs_backend_extents_rb *r, int v)
+static inline void __cyanfs_super_stat_add(struct cyanfs_super *s, struct cyanfs_backend_extents_rb *r, int v)
 {
 	if (r == &s->free_extents)
 		s->meta.free_extents += v;
@@ -261,7 +261,7 @@ static void inline __cyanfs_super_stat_add(struct cyanfs_super *s, struct cyanfs
 		s->meta.journal_extents += v;
 }
 
-static void inline __cyanfs_extent_super_to_super(struct cyanfs_super *s, struct cyanfs_extent_node *n,
+static inline void __cyanfs_extent_super_to_super(struct cyanfs_super *s, struct cyanfs_extent_node *n,
 						  struct cyanfs_backend_extents_rb *from,
 						  struct cyanfs_backend_extents_rb *to)
 {
@@ -271,7 +271,7 @@ static void inline __cyanfs_extent_super_to_super(struct cyanfs_super *s, struct
 	__cyanfs_super_stat_add(s, to, 1);
 }
 
-static void inline __cyanfs_extent_file_to_super(struct cyanfs_super *s, struct cyanfs_file *f,
+static inline void __cyanfs_extent_file_to_super(struct cyanfs_super *s, struct cyanfs_file *f,
 						 struct cyanfs_extent_node *n, struct cyanfs_file_extents_rb *from,
 						 struct cyanfs_backend_extents_rb *to)
 {
@@ -282,7 +282,7 @@ static void inline __cyanfs_extent_file_to_super(struct cyanfs_super *s, struct 
 	__cyanfs_super_stat_add(s, to, 1);
 }
 
-static void inline __cyanfs_extent_super_to_file(struct cyanfs_super *s, struct cyanfs_file *f,
+static inline void __cyanfs_extent_super_to_file(struct cyanfs_super *s, struct cyanfs_file *f,
 						 struct cyanfs_extent_node *n, struct cyanfs_backend_extents_rb *from,
 						 struct cyanfs_file_extents_rb *to)
 {

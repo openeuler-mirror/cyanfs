@@ -1,4 +1,8 @@
 /.vscode
+/.claude
+/.AGENTS.md
+/AGENTS.md
+/CLAUDE.md
 /build
 
 *.o

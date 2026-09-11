@@ -33,6 +33,7 @@ module_param(debug_dump_journal, int, 0644);
 #endif
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_DESCRIPTION("CyanFS block device driver");
 MODULE_VERSION(GIT_COMMIT_STRING);
 
 #define CYANFS_FLUSH_INTERVAL (60 * HZ)
@@ -319,7 +320,14 @@ struct cyanfs_backend *cyanfs_backend_open(dev_t dev)
 		backend->bvecs[i].bv_offset = 0;
 	}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	backend->dev_file = bdev_file_open_by_dev(dev, BLK_OPEN_READ | BLK_OPEN_WRITE | BLK_OPEN_EXCL, backend, NULL);
+	if (IS_ERR(backend->dev_file)) {
+		error = PTR_ERR(backend->dev_file);
+		goto backend_out;
+	}
+	backend->dev = file_bdev(backend->dev_file);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 	backend->dev_handle = bdev_open_by_dev(dev, BLK_OPEN_READ | BLK_OPEN_WRITE | BLK_OPEN_EXCL, backend, NULL);
 	if (IS_ERR(backend->dev_handle)) {
 		error = PTR_ERR(backend->dev_handle);
@@ -344,11 +352,19 @@ struct cyanfs_backend *cyanfs_backend_open(dev_t dev)
 		error = -EMEDIUMTYPE;
 		goto dev_out;
 	}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
+	CYANFS_BACKEND_DEBUG(backend, "write cache: %d", blk_queue_write_cache(bdev_get_queue(backend->dev)));
+#else
 	CYANFS_BACKEND_DEBUG(backend, "write cache: %d",
 			     test_bit(QUEUE_FLAG_WC, &bdev_get_queue(backend->dev)->queue_flags));
+#endif
 	CYANFS_BACKEND_DEBUG(backend, "discard: %u", bdev_get_queue(backend->dev)->limits.max_discard_sectors);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	backend->super = cyanfs_super_open(bdev_nr_bytes(backend->dev),
+#else
 	backend->super = cyanfs_super_open(i_size_read(backend->dev->bd_inode),
+#endif
 					   bdev_get_queue(backend->dev)->limits.max_discard_sectors, true);
 	if (!backend->super) {
 		error = -ENOMEM;
@@ -375,7 +391,9 @@ struct cyanfs_backend *cyanfs_backend_open(dev_t dev)
 super_out:
 	cyanfs_super_close(backend->super);
 dev_out:
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	bdev_fput(backend->dev_file);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 	bdev_release(backend->dev_handle);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
 	blkdev_put(backend->dev, backend);
@@ -403,7 +421,9 @@ static void cyanfs_backend_close(struct kref *ref)
 	queue_work(cyanfs_workqueue, &backend->work);
 	flush_work(&backend->work);
 	cyanfs_super_close(backend->super);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	bdev_fput(backend->dev_file);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 	bdev_release(backend->dev_handle);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
 	blkdev_put(backend->dev, backend);
