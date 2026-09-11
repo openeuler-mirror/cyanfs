@@ -55,6 +55,13 @@ static void cyanfs_journal_loader_end(struct cyanfs_task_journal_loader *t, int 
 
 static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_status err);
 
+struct cyanfs_journal_record_info {
+	uint8_t *entries;
+	uint16_t regular_count;
+	int has_next;
+	cyanfs_extent_id next_id;
+};
+
 static void cyanfs_journal_loader_read_page(struct cyanfs_task_journal_loader *t)
 {
 	struct cyanfs_super *s = t->base.super;
@@ -92,11 +99,51 @@ static void cyanfs_journal_loader_read_extent(struct cyanfs_task_journal_loader 
 	cyanfs_journal_loader_read_page(t);
 }
 
+static cyanfs_status cyanfs_journal_validate_record(uint8_t *p, uint8_t *record_end, uint16_t count,
+					    struct cyanfs_journal_record_info *info)
+{
+	struct cyanfs_journal_entry j;
+	int i;
+
+	if (!count) {
+		CYANFS_DEBUG("journal entry count is zero");
+		return -CYANFS_ERR_INVAL;
+	}
+
+	info->entries = p;
+	info->regular_count = 0;
+	info->has_next = 0;
+	for (i = 0; i < count; i++) {
+		if (cyanfs_journal_decode_entry_checked(&p, record_end, &j)) {
+			CYANFS_DEBUG("journal entry decode error");
+			return -CYANFS_ERR_INVAL;
+		}
+		if (j.type == CYANFS_JOURNAL_NEXT) {
+			if (i != count - 1) {
+				CYANFS_DEBUG("journal NEXT entry is not last");
+				return -CYANFS_ERR_INVAL;
+			}
+			info->has_next = 1;
+			info->next_id = j.next.backend;
+		} else {
+			++info->regular_count;
+		}
+	}
+
+	if (record_end - p >= CYANFS_JOURNAL_BLOCK_SIZE) {
+		CYANFS_DEBUG("journal padding is too large");
+		return -CYANFS_ERR_INVAL;
+	}
+
+	return 0;
+}
+
 static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_status err)
 {
 	struct cyanfs_task_journal_loader *t = cyanfs_container_of(base, struct cyanfs_task_journal_loader, base);
 	struct cyanfs_journal_header h;
 	struct cyanfs_journal_entry j;
+	struct cyanfs_journal_record_info info;
 	uint64_t offset_in_page = 0;
 	uint8_t *page_end;
 
@@ -133,34 +180,31 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 		if (h.seq != t->cursor->seq)
 			break;
 
-		if (!h.count) {
-			CYANFS_DEBUG("journal entry count is zero");
-			goto error;
-		}
-
 		record_end = p + h.size;
 		p += CYANFS_JOURNAL_HEADER_SIZE;
+		if (cyanfs_journal_validate_record(p, record_end, h.count, &info))
+			goto error;
+
+		p = info.entries;
 		for (i = 0; i < h.count; i++) {
 			if (cyanfs_journal_decode_entry_checked(&p, record_end, &j)) {
-				CYANFS_DEBUG("journal entry decode error");
+				CYANFS_DEBUG("journal entry decode error after validation");
 				goto error;
 			}
 			cyanfs_journal_dump_entry(&j);
-			if (j.type != CYANFS_JOURNAL_NEXT) {
-				if (t->operations.parser(t, &j)) {
-					CYANFS_DEBUG("journal entry error");
-					goto error;
-				}
-			} else if (i != h.count - 1) {
-				CYANFS_DEBUG("journal NEXT entry is not last");
+			if (j.type != CYANFS_JOURNAL_NEXT && t->operations.parser(t, &j)) {
+				CYANFS_DEBUG("journal entry error");
 				goto error;
-			} else if (j.next.backend != t->end_id) {
-				cyanfs_journal_loader_read_extent(t, j.next.backend);
-				return;
-			} else {
-				goto done;
 			}
-			++t->cursor->seq;
+		}
+		t->cursor->seq += info.regular_count;
+
+		if (info.has_next) {
+			if (info.next_id != t->end_id) {
+				cyanfs_journal_loader_read_extent(t, info.next_id);
+				return;
+			}
+			goto done;
 		}
 
 		t->cursor->extent_off += h.size;
