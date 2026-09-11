@@ -99,8 +99,12 @@ static void cyanfs_file_map_bio(struct bio *bio)
 	int err;
 
 	if (bio_op(bio) == REQ_OP_FLUSH || bio->bi_iter.bi_size == 0) {
+		err = cyanfs_file_status(file);
 		bio->bi_next = NULL;
-		submit_bio(bio);
+		if (err)
+			cyanfs_bio_endio_error(bio, err);
+		else
+			submit_bio(bio);
 		return;
 	} else if (bio_op(bio) == REQ_OP_READ) {
 		fn = cyanfs_read;
@@ -143,18 +147,26 @@ void cyanfs_file_submit_bio(struct cyanfs_file *file, struct cyanfs_backend *bac
 	if ((bio_op(bio) == REQ_OP_FLUSH) || (bio->bi_opf & REQ_PREFLUSH)) {
 		err = cyanfs_flush(file, &map);
 		if (err < 0) {
+			bio->bi_next = NULL;
 			cyanfs_bio_endio_error(bio, err);
 			return;
 		}
 
 		if (map == CYANFS_MAP_REQUEUE) {
 			err = cyanfs_requeue(file, bio, __cyanfs_file_map_bio);
-			if (err)
+			if (err) {
+				bio->bi_next = NULL;
 				cyanfs_bio_endio_error(bio, err);
+			}
 			return;
 		} else if (map == CYANFS_MAP_NOP) {
 			if (bio_op(bio) == REQ_OP_FLUSH || bio->bi_iter.bi_size == 0) {
-				bio_endio(bio);
+				err = cyanfs_file_status(file);
+				bio->bi_next = NULL;
+				if (err)
+					cyanfs_bio_endio_error(bio, err);
+				else
+					bio_endio(bio);
 				return;
 			}
 		}

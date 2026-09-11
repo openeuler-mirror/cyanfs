@@ -145,6 +145,8 @@ extern void cyanfs_super_close(struct cyanfs_super *s);
 extern struct cyanfs_task *cyanfs_super_get_task(struct cyanfs_super *s);
 extern void cyanfs_super_set_new_task_callback(struct cyanfs_super *s, void *ctx, cyanfs_ctx_fn fn);
 extern int cyanfs_super_is_ready(struct cyanfs_super *s);
+extern cyanfs_status cyanfs_super_status(struct cyanfs_super *s);
+extern cyanfs_status cyanfs_file_status(struct cyanfs_file *f);
 
 extern cyanfs_status cyanfs_super_flush(struct cyanfs_super *s, int ondisk);
 extern void cyanfs_super_compact(struct cyanfs_super *s);

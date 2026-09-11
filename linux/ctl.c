@@ -114,7 +114,7 @@ static int cyanfs_ctl_backend_sync(struct file *file, cyanfs_ioctl_backend_sync_
 	if (r < 0)
 		return r;
 	flush_work(&backend->work);
-	return 0;
+	return cyanfs_super_status(backend->super);
 }
 
 static int cyanfs_ctl_device_map(struct file *file, cyanfs_ioctl_device_map_t *v)
@@ -255,7 +255,7 @@ static int cyanfs_ctl_flush(struct cyanfs_ctl_ctx *ctx)
 		return r;
 
 	if (map == CYANFS_MAP_NOP) {
-		return 0;
+		return cyanfs_file_status(ctx->file);
 	} else if (map == CYANFS_MAP_REQUEUE) {
 		DECLARE_COMPLETION_ONSTACK(waiter);
 		r = cyanfs_requeue(ctx->file, &waiter, __complete);
@@ -264,12 +264,15 @@ static int cyanfs_ctl_flush(struct cyanfs_ctl_ctx *ctx)
 		wait_for_completion_io(&waiter);
 	}
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0)
-	return blkdev_issue_flush(ctx->backend->dev, GFP_KERNEL, NULL);
+	r = blkdev_issue_flush(ctx->backend->dev, GFP_KERNEL, NULL);
 #elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 12, 0)
-	return blkdev_issue_flush(ctx->backend->dev, GFP_KERNEL);
+	r = blkdev_issue_flush(ctx->backend->dev, GFP_KERNEL);
 #else
-	return blkdev_issue_flush(ctx->backend->dev);
+	r = blkdev_issue_flush(ctx->backend->dev);
 #endif
+	if (r < 0)
+		return r;
+	return cyanfs_file_status(ctx->file);
 }
 
 static int cyanfs_ctl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
