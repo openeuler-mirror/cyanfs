@@ -445,6 +445,12 @@ static void cyanfs_journal_writer_encode(struct cyanfs_task *base, cyanfs_status
 	struct cyanfs_journal_header h;
 	cyanfs_extent_id new_extent = cyanfs_extent_id_invalid;
 
+	if (!err) {
+		cyanfs_read_lock(&s->files_lock);
+		if (s->flags & CYANFS_SUPER_FLAG_ERROR)
+			err = -CYANFS_ERR_IO;
+		cyanfs_read_unlock(&s->files_lock);
+	}
 	if (err) {
 		if (t->operations.error)
 			t->operations.error(t);
