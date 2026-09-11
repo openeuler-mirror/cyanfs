@@ -28,14 +28,18 @@ static inline void cyanfs_super_encode_header(uint8_t *p, struct cyanfs_super_he
 	cyanfs_put64(&p, h->journal_seq);
 }
 
-static inline void cyanfs_super_decode_header(uint8_t *p, struct cyanfs_super_header *h)
+static inline uint64_t cyanfs_super_decode_header(uint8_t *p, struct cyanfs_super_header *h)
 {
+	uint64_t journal_id;
+
 	h->crc32 = cyanfs_get32(&p);
 	h->magic = cyanfs_get32(&p);
 	cyanfs_get_generic(&p, &h->uuid, sizeof(cyanfs_uuid_t));
 	h->version = cyanfs_get64(&p);
-	h->journal_id = cyanfs_get64(&p);
+	journal_id = cyanfs_get64(&p);
+	h->journal_id = 0;
 	h->journal_seq = cyanfs_get64(&p);
+	return journal_id;
 }
 
 struct cyanfs_journal_cursor {
@@ -339,6 +343,13 @@ struct cyanfs_extent_set {
 	cyanfs_extent_id id[CYANFS_EXTENT_SET_LIIMT];
 };
 
+struct cyanfs_journal_visited_extent {
+	cyanfs_extent_id id;
+	CYANFS_RB_ENTRY(cyanfs_journal_visited_extent) node;
+};
+
+CYANFS_RB_HEAD(cyanfs_journal_visited_extents_rb, cyanfs_journal_visited_extent);
+
 struct cyanfs_task_journal_loader {
 	struct cyanfs_task base;
 	struct cyanfs_journal_cursor *cursor;
@@ -347,6 +358,7 @@ struct cyanfs_task_journal_loader {
 
 	struct cyanfs_extent_set static_journals;
 	struct cyanfs_list_head journals;
+	struct cyanfs_journal_visited_extents_rb visited_extents;
 
 	struct {
 		cyanfs_status (*parser)(struct cyanfs_task_journal_loader *t, struct cyanfs_journal_entry *j);
@@ -365,6 +377,7 @@ static inline void cyanfs_journal_loader_init(struct cyanfs_task_journal_loader 
 	t->static_journals.count = 0;
 	CYANFS_INIT_LIST_HEAD(&t->journals);
 	cyanfs_list_add_tail(&t->static_journals.node, &t->journals);
+	CYANFS_RB_INIT(&t->visited_extents);
 }
 
 int cyanfs_journal_loader_start(struct cyanfs_super *s, struct cyanfs_task_journal_loader *t);
