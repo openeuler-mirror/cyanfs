@@ -151,6 +151,14 @@ static cyanfs_status cyanfs_journal_compact_loader_parser(struct cyanfs_task_jou
 	return __cyanfs_super_journal_replay(&t->compact, j);
 }
 
+static int cyanfs_journal_compact_count_entry(cyanfs_journal_seq_t *count)
+{
+	if (*count == ~(cyanfs_journal_seq_t)0)
+		return 1;
+	++*count;
+	return 0;
+}
+
 static void cyanfs_journal_compact_loader_error(struct cyanfs_task_journal_loader *loader)
 {
 	struct cyanfs_task_journal_compact *t = cyanfs_container_of(loader, struct cyanfs_task_journal_compact, loader);
@@ -164,7 +172,7 @@ static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_load
 	struct cyanfs_file *f;
 	struct cyanfs_extent_node *n;
 	struct cyanfs_journal_entry *j;
-	int count = 0;
+	cyanfs_journal_seq_t count = 0;
 
 	cyanfs_journal_writer_init(&t->writer);
 	CYANFS_RB_FOREACH(f, cyanfs_files_id_rb, &t->compact.files_by_id)
@@ -178,7 +186,8 @@ static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_load
 			j->fork.id = f->meta.id;
 			j->fork.pid = f->meta.parent_id;
 			cyanfs_list_add_tail(&j->list, &t->writer.head);
-			++count;
+			if (cyanfs_journal_compact_count_entry(&count))
+				goto err;
 			truncate = f->parent->meta.size != f->meta.size;
 		} else {
 			j = cyanfs_journal_alloc(CYANFS_JOURNAL_CREATE);
@@ -187,7 +196,8 @@ static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_load
 			*j->create.name = f->meta.name;
 			j->create.id = f->meta.id;
 			cyanfs_list_add_tail(&j->list, &t->writer.head);
-			++count;
+			if (cyanfs_journal_compact_count_entry(&count))
+				goto err;
 			truncate = f->meta.size > 0;
 		}
 		if (truncate) {
@@ -197,7 +207,8 @@ static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_load
 			j->truncate.id = f->meta.id;
 			j->truncate.size = f->meta.size;
 			cyanfs_list_add_tail(&j->list, &t->writer.head);
-			++count;
+			if (cyanfs_journal_compact_count_entry(&count))
+				goto err;
 		}
 		CYANFS_RB_FOREACH(n, cyanfs_file_extents_rb, &f->extents)
 		{
@@ -208,12 +219,16 @@ static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_load
 			j->bind.file = n->v.file;
 			j->bind.backend = n->v.backend;
 			cyanfs_list_add_tail(&j->list, &t->writer.head);
-			++count;
+			if (cyanfs_journal_compact_count_entry(&count))
+				goto err;
 		}
 	}
 
 	t->header = loader->header;
-	CYANFS_BUG_ON(t->compact.journal_cursor.seq < count);
+	if (count > t->compact.journal_cursor.seq) {
+		CYANFS_DEBUG("compact journal entry count exceeds sequence.");
+		goto err;
+	}
 	t->header.journal_seq = t->compact.journal_cursor.seq - count;
 	++t->header.version;
 
