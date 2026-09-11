@@ -678,18 +678,39 @@ static int openfs(struct disk *disk)
 	if (!disk->super)
 		return -ENOMEM;
 	do_loop(disk);
-	if (!cyanfs_super_is_ready(disk->super))
-		return -EIO;
+	if (!cyanfs_super_is_ready(disk->super)) {
+		r = -EIO;
+		goto close_super;
+	}
 	disk->new_task = 0;
 	disk->terminated = 0;
-	pthread_mutex_init(&disk->lock, NULL);
-	pthread_cond_init(&disk->cond, NULL);
+	r = pthread_mutex_init(&disk->lock, NULL);
+	if (r) {
+		r = -r;
+		goto close_super;
+	}
+	r = pthread_cond_init(&disk->cond, NULL);
+	if (r) {
+		r = -r;
+		goto destroy_mutex;
+	}
 	r = pthread_create(&disk->thread, NULL, thread_handler, disk);
-	if (r < 0)
-		return r;
+	if (r) {
+		r = -r;
+		goto destroy_cond;
+	}
 	CYANFS_DEBUG("thread start");
 	cyanfs_super_set_new_task_callback(disk->super, disk, do_new_task);
 	return 0;
+
+destroy_cond:
+	pthread_cond_destroy(&disk->cond);
+destroy_mutex:
+	pthread_mutex_destroy(&disk->lock);
+close_super:
+	cyanfs_super_close(disk->super);
+	disk->super = NULL;
+	return r;
 }
 
 static void closefs(struct disk *disk)
@@ -704,10 +725,13 @@ static void closefs(struct disk *disk)
 	pthread_mutex_unlock(&disk->lock);
 	pthread_join(disk->thread, &thread_ret);
 	CYANFS_DEBUG("thread quit");
+	cyanfs_super_set_new_task_callback(disk->super, NULL, NULL);
 	cyanfs_super_flush(disk->super, 1);
 	do_loop(disk);
 	cyanfs_super_close(disk->super);
 	disk->super = NULL;
+	pthread_cond_destroy(&disk->cond);
+	pthread_mutex_destroy(&disk->lock);
 }
 
 static int do_mount(struct disk *disk, int argc, const char *argv[])
