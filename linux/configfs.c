@@ -311,11 +311,17 @@ CONFIGFS_ATTR_WO(cyanfs_backend_cmd_, sync);
 
 static ssize_t cyanfs_backend_cmd_compact_store(struct config_item *item, const char *page, size_t count)
 {
+	int r;
 	struct cyanfs_backend *backend = to_backend(item);
 
 	cyanfs_super_compact(backend->super);
 
-	flush_work(&backend->work);
+	r = cyanfs_backend_wait_tasks(backend);
+	if (r < 0)
+		return r;
+	r = cyanfs_super_status(backend->super);
+	if (r < 0)
+		return r;
 	return count;
 }
 

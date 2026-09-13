@@ -316,17 +316,12 @@ static void cyanfs_backend_work(struct work_struct *work)
 	}
 }
 
-int cyanfs_backend_sync(struct cyanfs_backend *backend)
+int cyanfs_backend_wait_tasks(struct cyanfs_backend *backend)
 {
 	struct cyanfs_backend_sync_waiter waiter;
-	int err;
 
 	if (WARN_ON_ONCE(current_work() == &backend->work))
 		return -EDEADLK;
-
-	err = cyanfs_super_flush(backend->super, true);
-	if (err)
-		return err;
 
 	INIT_LIST_HEAD(&waiter.node);
 	init_completion(&waiter.done);
@@ -336,6 +331,24 @@ int cyanfs_backend_sync(struct cyanfs_backend *backend)
 
 	queue_work(cyanfs_workqueue, &backend->work);
 	wait_for_completion_io(&waiter.done);
+
+	return 0;
+}
+
+int cyanfs_backend_sync(struct cyanfs_backend *backend)
+{
+	int err;
+
+	if (WARN_ON_ONCE(current_work() == &backend->work))
+		return -EDEADLK;
+
+	err = cyanfs_super_flush(backend->super, true);
+	if (err)
+		return err;
+
+	err = cyanfs_backend_wait_tasks(backend);
+	if (err)
+		return err;
 
 	return cyanfs_super_status(backend->super);
 }
