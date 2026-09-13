@@ -360,32 +360,29 @@ Exit:
 	return Status;
 }
 
+static EFI_STATUS CyanfsCloseBlockIo(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI_HANDLE Controller)
+{
+	return gBS->CloseProtocol(Controller, &gEfiBlockIoProtocolGuid, This->DriverBindingHandle, Controller);
+}
+
 EFI_STATUS EFIAPI CyanfsDriverStart(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI_HANDLE Controller,
 				    IN EFI_DEVICE_PATH_PROTOCOL *RemainingDevicePath)
 {
-	EFI_STATUS Status;
+	EFI_STATUS Status, CloseStatus;
 	EFI_BLOCK_IO_PROTOCOL *Disk;
 	EFI_CYANFS_PROTOCOL *Cyanfs;
 	CYANFS_BACKEND *Backend;
 
-	Status = gBS->OpenProtocol(Controller, &gEfiCyanfsProtocolGuid, NULL, This->DriverBindingHandle, Controller,
-				   EFI_OPEN_PROTOCOL_TEST_PROTOCOL);
-	if (!EFI_ERROR(Status)) {
-		Status = EFI_ALREADY_STARTED;
-		goto Exit;
-	}
-
 	Status = gBS->OpenProtocol(Controller, &gEfiBlockIoProtocolGuid, (VOID **)&Disk, This->DriverBindingHandle,
-				   Controller, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+				   Controller, EFI_OPEN_PROTOCOL_BY_DRIVER);
 	if (EFI_ERROR(Status)) {
-		Status = EFI_UNSUPPORTED;
 		goto Exit;
 	}
 
 	Backend = AllocatePool(sizeof(CYANFS_BACKEND));
 	if (!Backend) {
 		Status = EFI_OUT_OF_RESOURCES;
-		goto Exit;
+		goto CloseBlockIo;
 	}
 
 	Backend->Disk = Disk;
@@ -426,6 +423,10 @@ FreeSuper:
 	cyanfs_super_close(Backend->Super);
 FreeProtocol:
 	FreePool(Backend);
+CloseBlockIo:
+	CloseStatus = CyanfsCloseBlockIo(This, Controller);
+	if (EFI_ERROR(CloseStatus))
+		ASSERT_EFI_ERROR(CloseStatus);
 Exit:
 	return Status;
 }
@@ -433,7 +434,7 @@ Exit:
 EFI_STATUS EFIAPI CyanfsDriverStop(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI_HANDLE Controller,
 				   IN UINTN NumberOfChildren, IN EFI_HANDLE *ChildHandleBuffer)
 {
-	EFI_STATUS Status;
+	EFI_STATUS Status, CloseStatus;
 	EFI_CYANFS_PROTOCOL *Cyanfs;
 	CYANFS_BACKEND *Backend;
 
@@ -448,40 +449,39 @@ EFI_STATUS EFIAPI CyanfsDriverStop(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI_
 
 	Backend = ToBackend(Cyanfs);
 	Status = CyanfsFlushMetadata(Backend, EFI_SUCCESS);
+	CloseStatus = gBS->CloseProtocol(Controller, &gEfiCyanfsProtocolGuid, This->DriverBindingHandle, Controller);
 	if (EFI_ERROR(Status)) {
-		gBS->CloseProtocol(Controller, &gEfiCyanfsProtocolGuid, This->DriverBindingHandle, Controller);
+		if (EFI_ERROR(CloseStatus))
+			ASSERT_EFI_ERROR(CloseStatus);
 		return Status;
 	}
+	if (EFI_ERROR(CloseStatus))
+		return CloseStatus;
+
+	Status = gBS->UninstallProtocolInterface(Controller, &gEfiCyanfsProtocolGuid, Cyanfs);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	CloseStatus = CyanfsCloseBlockIo(This, Controller);
+	if (EFI_ERROR(CloseStatus))
+		ASSERT_EFI_ERROR(CloseStatus);
 	cyanfs_super_close(Backend->Super);
-
-	gBS->CloseProtocol(Controller, &gEfiBlockIoProtocolGuid, This->DriverBindingHandle, Controller);
-	gBS->CloseProtocol(Controller, &gEfiCyanfsProtocolGuid, This->DriverBindingHandle, Controller);
-	gBS->UninstallProtocolInterface(Controller, &gEfiCyanfsProtocolGuid, Cyanfs);
-
 	FreePool(Backend);
-	return EFI_SUCCESS;
+	return CloseStatus;
 }
 
 EFI_STATUS EFIAPI CyanfsDriverSupported(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI_HANDLE Controller,
 					IN EFI_DEVICE_PATH_PROTOCOL *RemainingDevicePath)
 {
-	EFI_STATUS Status;
+	EFI_STATUS Status, CloseStatus;
 	EFI_BLOCK_IO_PROTOCOL *Disk;
 	UINT8 *Buffer;
 	UINT64 DiskSize;
 	struct cyanfs_super_header Header;
 
-	Status = gBS->OpenProtocol(Controller, &gEfiCyanfsProtocolGuid, NULL, This->DriverBindingHandle, Controller,
-				   EFI_OPEN_PROTOCOL_TEST_PROTOCOL);
-	if (!EFI_ERROR(Status)) {
-		Status = EFI_ALREADY_STARTED;
-		goto Exit;
-	}
-
 	Status = gBS->OpenProtocol(Controller, &gEfiBlockIoProtocolGuid, (VOID **)&Disk, This->DriverBindingHandle,
-				   Controller, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+				   Controller, EFI_OPEN_PROTOCOL_BY_DRIVER);
 	if (EFI_ERROR(Status)) {
-		Status = EFI_UNSUPPORTED;
 		goto Exit;
 	}
 
@@ -517,7 +517,9 @@ EFI_STATUS EFIAPI CyanfsDriverSupported(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN
 Free:
 	FreePool(Buffer);
 Close:
-	gBS->CloseProtocol(Controller, &gEfiBlockIoProtocolGuid, This->DriverBindingHandle, Controller);
+	CloseStatus = CyanfsCloseBlockIo(This, Controller);
+	if (EFI_ERROR(CloseStatus))
+		return CloseStatus;
 Exit:
 	return Status;
 }
