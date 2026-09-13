@@ -34,6 +34,10 @@ typedef struct {
 	struct cyanfs_super *Super;
 	EFI_BLOCK_IO_PROTOCOL *Disk;
 	EFI_CYANFS_PROTOCOL Protocol;
+
+	EFI_HANDLE Controller;
+	EFI_HANDLE DriverBindingHandle;
+	struct cyanfs_list_head Children;
 } CYANFS_BACKEND;
 
 // 只支持512字节的逻辑块
@@ -150,11 +154,23 @@ EFI_STATUS EFIAPI CyanfsDelete(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID
 	return CyanfsFlushMetadata(Backend, Status);
 }
 
+typedef enum {
+	CYANFS_DISK_CREATING,
+	CYANFS_DISK_MANAGED,
+	CYANFS_DISK_STOPPING,
+	CYANFS_DISK_DEGRADED,
+} CYANFS_DISK_STATE;
+
 typedef struct {
 	EFI_HANDLE Handle;
 
 	struct cyanfs_file *File;
 	CYANFS_BACKEND *Backend;
+	struct cyanfs_list_head Link;
+	CYANFS_DISK_STATE State;
+	BOOLEAN BlockIoInstalled;
+	BOOLEAN DevicePathInstalled;
+	BOOLEAN ByChildOpened;
 
 	EFI_BLOCK_IO_PROTOCOL BlockIo;
 	EFI_BLOCK_IO_MEDIA Media;
@@ -279,24 +295,270 @@ EFI_STATUS EFIAPI CyanfsIoReset(IN EFI_BLOCK_IO_PROTOCOL *This, IN BOOLEAN Exten
 	return EFI_SUCCESS;
 }
 
+static CYANFS_DISK *CyanfsFindChild(CYANFS_BACKEND *Backend, EFI_HANDLE ChildHandle)
+{
+	struct cyanfs_list_head *Link;
+
+	cyanfs_list_for_each(Link, &Backend->Children) {
+		CYANFS_DISK *Disk = cyanfs_container_of(Link, CYANFS_DISK, Link);
+
+		if (Disk->Handle == ChildHandle)
+			return Disk;
+	}
+	return NULL;
+}
+
+static VOID CyanfsRefreshDiskProtocols(CYANFS_DISK *Disk)
+{
+	VOID *Interface = NULL;
+
+	Disk->BlockIoInstalled = FALSE;
+	Disk->DevicePathInstalled = FALSE;
+	if (!Disk->Handle)
+		return;
+
+	if (!EFI_ERROR(gBS->HandleProtocol(Disk->Handle, &gEfiBlockIoProtocolGuid, &Interface)) &&
+	    Interface == &Disk->BlockIo)
+		Disk->BlockIoInstalled = TRUE;
+
+	Interface = NULL;
+	if (!EFI_ERROR(gBS->HandleProtocol(Disk->Handle, &gEfiDevicePathProtocolGuid, &Interface)) &&
+	    Interface == Disk->DevicePath)
+		Disk->DevicePathInstalled = TRUE;
+}
+
+static EFI_STATUS CyanfsOpenChildBlockIo(CYANFS_DISK *Disk)
+{
+	CYANFS_BACKEND *Backend = Disk->Backend;
+	EFI_BLOCK_IO_PROTOCOL *ParentDisk;
+	EFI_STATUS Status;
+
+	if (Disk->ByChildOpened)
+		return EFI_SUCCESS;
+
+	Status = gBS->OpenProtocol(Backend->Controller, &gEfiBlockIoProtocolGuid, (VOID **)&ParentDisk,
+				   Backend->DriverBindingHandle, Disk->Handle,
+				   EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER);
+	if (EFI_ERROR(Status))
+		return Status;
+	if (ParentDisk != Backend->Disk) {
+		Status = gBS->CloseProtocol(Backend->Controller, &gEfiBlockIoProtocolGuid,
+					    Backend->DriverBindingHandle, Disk->Handle);
+		if (EFI_ERROR(Status))
+			ASSERT_EFI_ERROR(Status);
+		return EFI_DEVICE_ERROR;
+	}
+
+	Disk->ByChildOpened = TRUE;
+	return EFI_SUCCESS;
+}
+
+static EFI_STATUS CyanfsCloseChildBlockIo(CYANFS_DISK *Disk)
+{
+	CYANFS_BACKEND *Backend = Disk->Backend;
+	EFI_STATUS Status;
+
+	if (!Disk->ByChildOpened)
+		return EFI_SUCCESS;
+
+	Status = gBS->CloseProtocol(Backend->Controller, &gEfiBlockIoProtocolGuid, Backend->DriverBindingHandle,
+				    Disk->Handle);
+	if (!EFI_ERROR(Status))
+		Disk->ByChildOpened = FALSE;
+	return Status;
+}
+
+static EFI_STATUS CyanfsInstallDiskProtocol(CYANFS_DISK *Disk, EFI_GUID *Protocol, VOID *Interface)
+{
+	EFI_STATUS Status;
+
+	Status = gBS->InstallMultipleProtocolInterfaces(&Disk->Handle, Protocol, Interface, NULL);
+	CyanfsRefreshDiskProtocols(Disk);
+	return Status;
+}
+
+static EFI_STATUS CyanfsRecoverDisk(CYANFS_DISK *Disk, BOOLEAN Reconnect)
+{
+	EFI_STATUS Status, FirstError = EFI_SUCCESS;
+
+	CyanfsRefreshDiskProtocols(Disk);
+	if (!Disk->BlockIoInstalled && !Disk->DevicePathInstalled) {
+		Disk->State = CYANFS_DISK_DEGRADED;
+		return EFI_NOT_FOUND;
+	}
+
+	Status = CyanfsOpenChildBlockIo(Disk);
+	if (EFI_ERROR(Status))
+		FirstError = Status;
+
+	if (!Disk->BlockIoInstalled) {
+		Status = CyanfsInstallDiskProtocol(Disk, &gEfiBlockIoProtocolGuid, &Disk->BlockIo);
+		if (EFI_ERROR(Status) && !EFI_ERROR(FirstError))
+			FirstError = Status;
+	}
+	if (!Disk->DevicePathInstalled) {
+		Status = CyanfsInstallDiskProtocol(Disk, &gEfiDevicePathProtocolGuid, Disk->DevicePath);
+		if (EFI_ERROR(Status) && !EFI_ERROR(FirstError))
+			FirstError = Status;
+	}
+
+	CyanfsRefreshDiskProtocols(Disk);
+	if (Disk->BlockIoInstalled && Disk->DevicePathInstalled && Disk->ByChildOpened) {
+		Disk->State = CYANFS_DISK_MANAGED;
+		if (Reconnect)
+			gBS->ConnectController(Disk->Handle, NULL, NULL, TRUE);
+		return EFI_SUCCESS;
+	}
+
+	Disk->State = CYANFS_DISK_DEGRADED;
+	return EFI_ERROR(FirstError) ? FirstError : EFI_DEVICE_ERROR;
+}
+
+static EFI_STATUS CyanfsUninstallDiskProtocols(CYANFS_DISK *Disk)
+{
+	EFI_STATUS Status;
+
+	CyanfsRefreshDiskProtocols(Disk);
+	if (Disk->BlockIoInstalled && Disk->DevicePathInstalled) {
+		Status = gBS->UninstallMultipleProtocolInterfaces(Disk->Handle, &gEfiBlockIoProtocolGuid,
+							 &Disk->BlockIo, &gEfiDevicePathProtocolGuid,
+							 Disk->DevicePath, NULL);
+	} else if (Disk->BlockIoInstalled) {
+		Status = gBS->UninstallProtocolInterface(Disk->Handle, &gEfiBlockIoProtocolGuid, &Disk->BlockIo);
+	} else if (Disk->DevicePathInstalled) {
+		Status = gBS->UninstallProtocolInterface(Disk->Handle, &gEfiDevicePathProtocolGuid, Disk->DevicePath);
+	} else {
+		Status = EFI_SUCCESS;
+	}
+
+	CyanfsRefreshDiskProtocols(Disk);
+	if (!EFI_ERROR(Status) && (Disk->BlockIoInstalled || Disk->DevicePathInstalled))
+		return EFI_DEVICE_ERROR;
+	return Status;
+}
+
+static EFI_STATUS CyanfsDestroyDisk(CYANFS_DISK *Disk)
+{
+	if (Disk->ByChildOpened || Disk->BlockIoInstalled || Disk->DevicePathInstalled)
+		return EFI_DEVICE_ERROR;
+
+	cyanfs_list_del(&Disk->Link);
+	cyanfs_close(Disk->File);
+	FreePool(Disk->DevicePath);
+	FreePool(Disk);
+	return EFI_SUCCESS;
+}
+
+static EFI_STATUS CyanfsValidateChildren(CYANFS_BACKEND *Backend, UINTN NumberOfChildren,
+					 EFI_HANDLE *ChildHandleBuffer)
+{
+	UINTN Index, Previous;
+
+	if (!ChildHandleBuffer)
+		return EFI_INVALID_PARAMETER;
+
+	for (Index = 0; Index < NumberOfChildren; Index++) {
+		CYANFS_DISK *Disk;
+
+		if (!ChildHandleBuffer[Index])
+			return EFI_INVALID_PARAMETER;
+		for (Previous = 0; Previous < Index; Previous++)
+			if (ChildHandleBuffer[Previous] == ChildHandleBuffer[Index])
+				return EFI_INVALID_PARAMETER;
+
+		Disk = CyanfsFindChild(Backend, ChildHandleBuffer[Index]);
+		if (!Disk || Disk->Backend != Backend || Disk->State == CYANFS_DISK_CREATING ||
+		    Disk->State == CYANFS_DISK_STOPPING)
+			return EFI_INVALID_PARAMETER;
+	}
+	return EFI_SUCCESS;
+}
+
+static EFI_STATUS CyanfsStopDisk(CYANFS_DISK *Disk)
+{
+	CYANFS_DISK_STATE PreviousState = Disk->State;
+	EFI_STATUS Status, RecoveryStatus;
+
+	Disk->State = CYANFS_DISK_STOPPING;
+	Status = CyanfsIoFlush(&Disk->BlockIo);
+	if (EFI_ERROR(Status)) {
+		Disk->State = PreviousState;
+		return Status;
+	}
+
+	Status = CyanfsCloseChildBlockIo(Disk);
+	if (EFI_ERROR(Status)) {
+		Disk->State = PreviousState;
+		return Status;
+	}
+
+	Status = CyanfsUninstallDiskProtocols(Disk);
+	if (!Disk->BlockIoInstalled && !Disk->DevicePathInstalled)
+		return CyanfsDestroyDisk(Disk);
+
+	RecoveryStatus = CyanfsRecoverDisk(Disk, TRUE);
+	if (EFI_ERROR(Status))
+		return Status;
+	if (EFI_ERROR(RecoveryStatus))
+		return RecoveryStatus;
+	return EFI_DEVICE_ERROR;
+}
+
+static EFI_STATUS CyanfsStopChildren(CYANFS_BACKEND *Backend, UINTN NumberOfChildren,
+				      EFI_HANDLE *ChildHandleBuffer)
+{
+	EFI_STATUS Status;
+	BOOLEAN Failed = FALSE;
+	UINTN Index;
+
+	Status = CyanfsValidateChildren(Backend, NumberOfChildren, ChildHandleBuffer);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	for (Index = 0; Index < NumberOfChildren; Index++) {
+		CYANFS_DISK *Disk = CyanfsFindChild(Backend, ChildHandleBuffer[Index]);
+
+		Status = CyanfsStopDisk(Disk);
+		if (EFI_ERROR(Status))
+			Failed = TRUE;
+	}
+	return Failed ? EFI_DEVICE_ERROR : EFI_SUCCESS;
+}
+
+static VOID CyanfsRecoverDegradedChildren(CYANFS_BACKEND *Backend)
+{
+	struct cyanfs_list_head *Link, *Next;
+
+	cyanfs_list_for_each_safe(Link, Next, &Backend->Children) {
+		CYANFS_DISK *Disk = cyanfs_container_of(Link, CYANFS_DISK, Link);
+
+		if (Disk->State == CYANFS_DISK_DEGRADED) {
+			Disk->State = CYANFS_DISK_STOPPING;
+			CyanfsRecoverDisk(Disk, TRUE);
+		}
+	}
+}
+
 EFI_STATUS EFIAPI CyanfsMap(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID ID,
 			    IN EFI_DEVICE_PATH *ParentDevicePath OPTIONAL, OUT EFI_DEVICE_PATH_PROTOCOL **DevicePath)
 {
 	CYANFS_BACKEND *Backend = ToBackend(Cyanfs);
-	EFI_STATUS Status;
+	EFI_STATUS Status, RecoveryStatus;
 	CYANFS_DISK *Disk;
 	struct cyanfs_file *File;
 	struct cyanfs_super_meta Meta;
 
+	if (!DevicePath)
+		return EFI_INVALID_PARAMETER;
+	*DevicePath = NULL;
+
 	Status = cyanfs_statfs(Backend->Super, &Meta);
-	if (EFI_ERROR(Status)) {
+	if (EFI_ERROR(Status))
 		goto Exit;
-	}
 
 	Status = cyanfs_open(Backend->Super, ID, !Backend->Disk->Media->ReadOnly, &File);
-	if (EFI_ERROR(Status)) {
+	if (EFI_ERROR(Status))
 		goto Exit;
-	}
 
 	if (!cyanfs_size(File)) {
 		Status = EFI_INVALID_PARAMETER;
@@ -311,6 +573,9 @@ EFI_STATUS EFIAPI CyanfsMap(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID ID
 
 	Disk->Backend = Backend;
 	Disk->File = File;
+	Disk->State = CYANFS_DISK_CREATING;
+	CYANFS_INIT_LIST_HEAD(&Disk->Link);
+	cyanfs_list_add_tail(&Disk->Link, &Backend->Children);
 
 	Disk->Media.RemovableMedia = FALSE;
 	Disk->Media.MediaPresent = TRUE;
@@ -334,26 +599,52 @@ EFI_STATUS EFIAPI CyanfsMap(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID ID
 	CopyMem(&Disk->DeviceNode.UUID, &Meta.uuid, sizeof(Meta.uuid));
 	Disk->DeviceNode.FileID = ID;
 
-	*DevicePath = AppendDevicePathNode(ParentDevicePath, (EFI_DEVICE_PATH_PROTOCOL *)&Disk->DeviceNode);
-	if (!*DevicePath) {
+	Disk->DevicePath = AppendDevicePathNode(ParentDevicePath, (EFI_DEVICE_PATH_PROTOCOL *)&Disk->DeviceNode);
+	if (!Disk->DevicePath) {
 		Status = EFI_OUT_OF_RESOURCES;
-		goto FreeDisk;
+		goto DestroyDisk;
 	}
-	Disk->DevicePath = *DevicePath;
 
 	Status = gBS->InstallMultipleProtocolInterfaces(&Disk->Handle, &gEfiBlockIoProtocolGuid, &Disk->BlockIo,
 							&gEfiDevicePathProtocolGuid, Disk->DevicePath, NULL);
+	CyanfsRefreshDiskProtocols(Disk);
 	if (EFI_ERROR(Status)) {
-		goto FreeDisk;
+		if (!Disk->BlockIoInstalled && !Disk->DevicePathInstalled)
+			goto DestroyDisk;
+		RecoveryStatus = CyanfsRecoverDisk(Disk, FALSE);
+		if (EFI_ERROR(RecoveryStatus))
+			return RecoveryStatus;
+		goto Commit;
+	}
+	if (!Disk->BlockIoInstalled || !Disk->DevicePathInstalled) {
+		RecoveryStatus = CyanfsRecoverDisk(Disk, FALSE);
+		if (EFI_ERROR(RecoveryStatus))
+			return RecoveryStatus;
+		goto Commit;
 	}
 
+	Status = CyanfsOpenChildBlockIo(Disk);
+	if (EFI_ERROR(Status)) {
+		CyanfsUninstallDiskProtocols(Disk);
+		if (!Disk->BlockIoInstalled && !Disk->DevicePathInstalled)
+			goto DestroyDisk;
+		RecoveryStatus = CyanfsRecoverDisk(Disk, FALSE);
+		if (EFI_ERROR(RecoveryStatus))
+			return RecoveryStatus;
+	}
+
+Commit:
+	Disk->State = CYANFS_DISK_MANAGED;
+	*DevicePath = Disk->DevicePath;
 	CYANFS_DEBUG("Register VDisk %p Handle %p Size: %llu", Disk, Disk->Handle, cyanfs_size(File));
 	gBS->ConnectController(Disk->Handle, NULL, NULL, TRUE);
-
 	return EFI_SUCCESS;
 
-FreeDisk:
-	FreePool(Disk);
+DestroyDisk:
+	RecoveryStatus = CyanfsDestroyDisk(Disk);
+	if (EFI_ERROR(RecoveryStatus))
+		return RecoveryStatus;
+	return Status;
 CloseFile:
 	cyanfs_close(File);
 Exit:
@@ -386,6 +677,9 @@ EFI_STATUS EFIAPI CyanfsDriverStart(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI
 	}
 
 	Backend->Disk = Disk;
+	Backend->Controller = Controller;
+	Backend->DriverBindingHandle = This->DriverBindingHandle;
+	CYANFS_INIT_LIST_HEAD(&Backend->Children);
 	Backend->Super = cyanfs_super_open(Disk->Media->LastBlock << SECTOR_SHIFT, 0, 0);
 	if (!Backend->Super) {
 		Status = EFI_OUT_OF_RESOURCES;
@@ -438,16 +732,34 @@ EFI_STATUS EFIAPI CyanfsDriverStop(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI_
 	EFI_CYANFS_PROTOCOL *Cyanfs;
 	CYANFS_BACKEND *Backend;
 
-	CYANFS_BUG_ON(NumberOfChildren != 0);
-
 	CYANFS_DEBUG("BackendDiskHandle", Controller);
 	Status = gBS->OpenProtocol(Controller, &gEfiCyanfsProtocolGuid, (VOID **)&Cyanfs, This->DriverBindingHandle,
 				   Controller, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
-	if (EFI_ERROR(Status)) {
+	if (EFI_ERROR(Status))
 		return EFI_INVALID_PARAMETER;
-	}
 
 	Backend = ToBackend(Cyanfs);
+	if (NumberOfChildren) {
+		Status = CyanfsStopChildren(Backend, NumberOfChildren, ChildHandleBuffer);
+		CloseStatus = gBS->CloseProtocol(Controller, &gEfiCyanfsProtocolGuid, This->DriverBindingHandle,
+						 Controller);
+		if (EFI_ERROR(Status)) {
+			if (EFI_ERROR(CloseStatus))
+				ASSERT_EFI_ERROR(CloseStatus);
+			return Status;
+		}
+		return CloseStatus;
+	}
+
+	if (!cyanfs_list_empty(&Backend->Children)) {
+		CyanfsRecoverDegradedChildren(Backend);
+		CloseStatus = gBS->CloseProtocol(Controller, &gEfiCyanfsProtocolGuid, This->DriverBindingHandle,
+						 Controller);
+		if (EFI_ERROR(CloseStatus))
+			ASSERT_EFI_ERROR(CloseStatus);
+		return EFI_DEVICE_ERROR;
+	}
+
 	Status = CyanfsFlushMetadata(Backend, EFI_SUCCESS);
 	CloseStatus = gBS->CloseProtocol(Controller, &gEfiCyanfsProtocolGuid, This->DriverBindingHandle, Controller);
 	if (EFI_ERROR(Status)) {
