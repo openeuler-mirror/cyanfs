@@ -105,16 +105,11 @@ static int cyanfs_ctl_backend_statfs(struct file *file, cyanfs_ioctl_backend_sta
 
 static int cyanfs_ctl_backend_sync(struct file *file, cyanfs_ioctl_backend_sync_t *v)
 {
-	int r;
 	struct cyanfs_backend *backend;
 	backend = cyanfs_ctl_backend_lookup(&v->dev);
 	if (!backend)
 		return -ENODEV;
-	r = cyanfs_super_flush(backend->super, true);
-	if (r < 0)
-		return r;
-	flush_work(&backend->work);
-	return cyanfs_super_status(backend->super);
+	return cyanfs_backend_sync(backend);
 }
 
 static int cyanfs_ctl_device_map(struct file *file, cyanfs_ioctl_device_map_t *v)

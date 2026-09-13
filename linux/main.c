@@ -14,6 +14,8 @@
  * Author: yuanzhu <yuanzhu@kylinsec.com.cn>
 */
 
+#include <linux/completion.h>
+
 #include "cyanfs.h"
 
 #define CYANFS_BACKEND_PRINTK(level, backend, fmt, args...)                                                            \
@@ -40,6 +42,11 @@ MODULE_VERSION(GIT_COMMIT_STRING);
 
 int cyanfs_major;
 static struct workqueue_struct *cyanfs_workqueue;
+
+struct cyanfs_backend_sync_waiter {
+	struct list_head node;
+	struct completion done;
+};
 
 static inline void cyanfs_bio_endio_status(struct bio *bio, blk_status_t status)
 {
@@ -290,10 +297,47 @@ static void cyanfs_backend_loop(struct cyanfs_backend *backend)
 static void cyanfs_backend_work(struct work_struct *work)
 {
 	struct cyanfs_backend *backend = container_of(work, struct cyanfs_backend, work);
+	struct cyanfs_backend_sync_waiter *waiter;
 	struct blk_plug plug;
+	LIST_HEAD(sync_waiters);
+
+	spin_lock(&backend->sync_waiters_lock);
+	list_splice_init(&backend->sync_waiters, &sync_waiters);
+	spin_unlock(&backend->sync_waiters_lock);
+
 	blk_start_plug(&plug);
 	cyanfs_backend_loop(backend);
 	blk_finish_plug(&plug);
+
+	while (!list_empty(&sync_waiters)) {
+		waiter = list_first_entry(&sync_waiters, struct cyanfs_backend_sync_waiter, node);
+		list_del(&waiter->node);
+		complete(&waiter->done);
+	}
+}
+
+int cyanfs_backend_sync(struct cyanfs_backend *backend)
+{
+	struct cyanfs_backend_sync_waiter waiter;
+	int err;
+
+	if (WARN_ON_ONCE(current_work() == &backend->work))
+		return -EDEADLK;
+
+	err = cyanfs_super_flush(backend->super, true);
+	if (err)
+		return err;
+
+	INIT_LIST_HEAD(&waiter.node);
+	init_completion(&waiter.done);
+	spin_lock(&backend->sync_waiters_lock);
+	list_add_tail(&waiter.node, &backend->sync_waiters);
+	spin_unlock(&backend->sync_waiters_lock);
+
+	queue_work(cyanfs_workqueue, &backend->work);
+	wait_for_completion_io(&waiter.done);
+
+	return cyanfs_super_status(backend->super);
 }
 
 static void cyanfs_backend_flush_work(struct work_struct *work)
@@ -320,6 +364,8 @@ struct cyanfs_backend *cyanfs_backend_open(dev_t dev)
 		goto out;
 	}
 	kref_init(&backend->ref);
+	spin_lock_init(&backend->sync_waiters_lock);
+	INIT_LIST_HEAD(&backend->sync_waiters);
 	backend->dev_id = dev;
 
 	for (i = 0; i < CYANFS_BIO_MAX_VECS; i++) {
