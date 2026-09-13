@@ -447,7 +447,11 @@ EFI_STATUS EFIAPI CyanfsDriverStop(IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI_
 	}
 
 	Backend = ToBackend(Cyanfs);
-	cyanfs_super_flush(Backend->Super, 1);
+	Status = CyanfsFlushMetadata(Backend, EFI_SUCCESS);
+	if (EFI_ERROR(Status)) {
+		gBS->CloseProtocol(Controller, &gEfiCyanfsProtocolGuid, This->DriverBindingHandle, Controller);
+		return Status;
+	}
 	cyanfs_super_close(Backend->Super);
 
 	gBS->CloseProtocol(Controller, &gEfiBlockIoProtocolGuid, This->DriverBindingHandle, Controller);
