@@ -93,13 +93,28 @@ EFI_STATUS EFIAPI CyanfsLookup(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_NA
 	return cyanfs_lookup(ToBackend(Cyanfs)->Super, *(cyanfs_file_name_t *)(&Name), (struct cyanfs_file_meta *)Meta);
 }
 
+static EFI_STATUS CyanfsFlushMetadata(CYANFS_BACKEND *Backend, EFI_STATUS OperationStatus)
+{
+	EFI_STATUS FlushStatus, CompletionStatus;
+
+	FlushStatus = cyanfs_super_flush(Backend->Super, 1);
+	CompletionStatus = cyanfs_super_status(Backend->Super);
+
+	if (EFI_ERROR(OperationStatus))
+		return OperationStatus;
+	if (EFI_ERROR(FlushStatus))
+		return FlushStatus;
+	if (EFI_ERROR(CompletionStatus))
+		return CompletionStatus;
+	return OperationStatus;
+}
+
 EFI_STATUS EFIAPI CyanfsCreate(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_NAME Name, OUT CYANFS_FILE_ID *ID)
 {
 	CYANFS_BACKEND *Backend = ToBackend(Cyanfs);
 	EFI_STATUS Status;
 	Status = cyanfs_create(Backend->Super, *(cyanfs_file_name_t *)(&Name), ID);
-	cyanfs_super_flush(Backend->Super, 1);
-	return Status;
+	return CyanfsFlushMetadata(Backend, Status);
 }
 
 EFI_STATUS EFIAPI CyanfsFork(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID From, IN CYANFS_FILE_NAME Name,
@@ -108,8 +123,7 @@ EFI_STATUS EFIAPI CyanfsFork(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID F
 	CYANFS_BACKEND *Backend = ToBackend(Cyanfs);
 	EFI_STATUS Status;
 	Status = cyanfs_fork(Backend->Super, From, *(cyanfs_file_name_t *)(&Name), ID);
-	cyanfs_super_flush(Backend->Super, 1);
-	return Status;
+	return CyanfsFlushMetadata(Backend, Status);
 }
 
 EFI_STATUS EFIAPI CyanfsRename(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID From, IN CYANFS_FILE_NAME Name)
@@ -117,8 +131,7 @@ EFI_STATUS EFIAPI CyanfsRename(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID
 	CYANFS_BACKEND *Backend = ToBackend(Cyanfs);
 	EFI_STATUS Status;
 	Status = cyanfs_rename(Backend->Super, From, *(cyanfs_file_name_t *)(&Name));
-	cyanfs_super_flush(Backend->Super, 1);
-	return Status;
+	return CyanfsFlushMetadata(Backend, Status);
 }
 
 EFI_STATUS EFIAPI CyanfsTruncate(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID ID, IN UINT64 Size)
@@ -126,8 +139,7 @@ EFI_STATUS EFIAPI CyanfsTruncate(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_
 	CYANFS_BACKEND *Backend = ToBackend(Cyanfs);
 	EFI_STATUS Status;
 	Status = cyanfs_truncate(Backend->Super, ID, Size);
-	cyanfs_super_flush(Backend->Super, 1);
-	return Status;
+	return CyanfsFlushMetadata(Backend, Status);
 }
 
 EFI_STATUS EFIAPI CyanfsDelete(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID ID)
@@ -135,8 +147,7 @@ EFI_STATUS EFIAPI CyanfsDelete(IN EFI_CYANFS_PROTOCOL *Cyanfs, IN CYANFS_FILE_ID
 	CYANFS_BACKEND *Backend = ToBackend(Cyanfs);
 	EFI_STATUS Status;
 	Status = cyanfs_delete(Backend->Super, ID);
-	cyanfs_super_flush(Backend->Super, 1);
-	return Status;
+	return CyanfsFlushMetadata(Backend, Status);
 }
 
 typedef struct {
@@ -232,7 +243,7 @@ EFI_STATUS EFIAPI CyanfsIoWrite(IN EFI_BLOCK_IO_PROTOCOL *This, IN UINT32 MediaI
 EFI_STATUS EFIAPI CyanfsIoFlush(IN EFI_BLOCK_IO_PROTOCOL *This)
 {
 	CYANFS_DISK *Disk = cyanfs_container_of(This, CYANFS_DISK, BlockIo);
-	EFI_STATUS Status;
+	EFI_STATUS Status, CompletionStatus;
 	cyanfs_map_type_t map;
 
 	Status = cyanfs_flush(Disk->File, &map);
@@ -241,16 +252,25 @@ EFI_STATUS EFIAPI CyanfsIoFlush(IN EFI_BLOCK_IO_PROTOCOL *This)
 
 	switch (map) {
 	case CYANFS_MAP_NOP:
-		break;
+		CompletionStatus = cyanfs_file_status(Disk->File);
+		if (EFI_ERROR(CompletionStatus))
+			return CompletionStatus;
+		return Status;
 	case CYANFS_MAP_REQUEUE:
 		CyanfsBackendLoop(Disk->Backend);
+		break;
 	case CYANFS_MAP_SUBMIT:
-		Status = Disk->Backend->Disk->FlushBlocks(Disk->Backend->Disk);
 		break;
 	default:
 		CYANFS_BUG_ON(1);
 	}
 
+	Status = Disk->Backend->Disk->FlushBlocks(Disk->Backend->Disk);
+	if (EFI_ERROR(Status))
+		return Status;
+	CompletionStatus = cyanfs_file_status(Disk->File);
+	if (EFI_ERROR(CompletionStatus))
+		return CompletionStatus;
 	return Status;
 }
 
