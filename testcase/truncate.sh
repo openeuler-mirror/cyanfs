@@ -26,4 +26,18 @@ echo -n | awk 'BEGIN{
   printf("zero-check foo 1048576 9437184\n");
 }' | $CMD $DISK batch -
 
+$CMD $DISK truncate foo 1048575
+$CMD $DISK list | grep foo | grep " 1048576 "
+$CMD $DISK truncate foo 1048576
+$CMD $DISK list | grep foo | grep " 1048576 "
+$CMD $DISK truncate foo 1048577
+$CMD $DISK list | grep foo | grep " 1052672 "
+
+$CMD $DISK truncate foo 1125899906842624
+$CMD $DISK list | grep foo | grep " 1125899906842624 "
+$CMD $DISK truncate foo 1125899906842625 && exit 1
+$CMD $DISK truncate foo 18446744073709551615 && exit 1
+$CMD $DISK truncate foo 10485760
+$CMD $DISK list | grep foo | grep " 10485760 "
+
 exit 0

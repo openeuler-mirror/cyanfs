@@ -302,7 +302,9 @@ static int do_file_truncate(int argc, const char *argv[])
 	truncate.id = meta.id;
 	if (sscanf(argv[2], "%" PRIu64, &truncate.size) != 1)
 		return -EINVAL;
-	truncate.size = ((truncate.size - 1) | 4095ULL) + 1;
+	if (truncate.size > CYANFS_FILE_MAX_SIZE)
+		return -EINVAL;
+	truncate.size = (truncate.size + CYANFS_FILE_ALIGN_MASK) & ~CYANFS_FILE_ALIGN_MASK;
 	if (ioctl(fd, CYANFS_IOCTL_FILE_TRUNCATE, &truncate) < 0)
 		return -errno;
 	return 0;

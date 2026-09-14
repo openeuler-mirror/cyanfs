@@ -352,6 +352,8 @@ cyanfs_status cyanfs_seek_extent(struct cyanfs_file *f, uint64_t *f_off)
 
 	if (f->open_type != CYANFS_FILE_READONLY)
 		return -CYANFS_ERR_INVAL;
+	if (*f_off >= f->meta.size)
+		return -CYANFS_ERR_NOENT;
 
 	tmp.v.file = cyanfs_extent_from(*f_off);
 	cyanfs_read_lock(&s->files_lock);

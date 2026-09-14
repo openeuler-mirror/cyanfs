@@ -261,6 +261,8 @@ static ssize_t cyanfs_backend_cmd_truncate_store(struct config_item *item, const
 		return r;
 	if (sscanf(cursor, "%llu", &size) != 1)
 		return -EINVAL;
+	if (size > CYANFS_FILE_MAX_SIZE)
+		return -EINVAL;
 
 	r = cyanfs_lookup(backend->super, name, &meta);
 	if (r < 0)

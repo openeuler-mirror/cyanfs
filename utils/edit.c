@@ -237,7 +237,10 @@ static int do_truncate(struct disk *disk, int argc, const char *argv[])
 		return r;
 	if (sscanf(argv[1], "%" PRIu64, &size) != 1)
 		return -EINVAL;
-	r = cyanfs_truncate(disk->super, meta.id, (size + CYANFS_FILE_ALIGN_MASK) & ~CYANFS_FILE_ALIGN_MASK);
+	if (size > CYANFS_FILE_MAX_SIZE)
+		return -EINVAL;
+	size = (size + CYANFS_FILE_ALIGN_MASK) & ~CYANFS_FILE_ALIGN_MASK;
+	r = cyanfs_truncate(disk->super, meta.id, size);
 	if (r < 0)
 		return r;
 	return 0;
