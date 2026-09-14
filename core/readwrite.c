@@ -112,7 +112,7 @@ cyanfs_status cyanfs_write(struct cyanfs_file *f, void *ctx, uint64_t f_off, uin
 
 		err = __cyanfs_super_ensure_status(s);
 		if (err)
-			goto out;
+			goto unlock_out;
 
 		n = __cyanfs_file_find_extent(f, f_off);
 		if (n)
