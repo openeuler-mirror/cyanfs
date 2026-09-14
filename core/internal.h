@@ -120,6 +120,22 @@ CYANFS_RB_GENERATE_INTERNAL(cyanfs_files_id_rb, cyanfs_file, id_node, __cyanfs_f
 
 CYANFS_RB_HEAD(cyanfs_files_name_rb, cyanfs_file);
 
+static inline cyanfs_status __cyanfs_file_name_normalize(cyanfs_file_name_t *name)
+{
+	uint32_t i;
+
+	if (!name->data[0] || name->zero)
+		return -CYANFS_ERR_INVAL;
+
+	for (i = 1; i < sizeof(name->data) && name->data[i]; ++i)
+		;
+	for (; i < sizeof(name->data); ++i)
+		name->data[i] = 0;
+	name->zero = 0;
+
+	return 0;
+}
+
 static inline int __cyanfs_file_name_compare(struct cyanfs_file *a, struct cyanfs_file *b)
 {
 	return cyanfs_memcmp(&a->meta.name, &b->meta.name, sizeof(cyanfs_file_name_t));
