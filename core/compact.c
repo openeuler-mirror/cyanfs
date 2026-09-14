@@ -312,6 +312,7 @@ void cyanfs_super_compact(struct cyanfs_super *s)
 		n = cyanfs_malloc(sizeof(struct cyanfs_extent_node));
 		if (!n)
 			goto task_out;
+		n->v.map = n->v.pending = n->v.error = 0;
 		n->v.backend = i;
 		CYANFS_RB_INSERT(cyanfs_backend_extents_rb, &t->compact.free_extents, n);
 	}
