@@ -28,14 +28,18 @@ static inline void cyanfs_super_encode_header(uint8_t *p, struct cyanfs_super_he
 	cyanfs_put64(&p, h->journal_seq);
 }
 
-static inline void cyanfs_super_decode_header(uint8_t *p, struct cyanfs_super_header *h)
+static inline uint64_t cyanfs_super_decode_header(uint8_t *p, struct cyanfs_super_header *h)
 {
+	uint64_t journal_id;
+
 	h->crc32 = cyanfs_get32(&p);
 	h->magic = cyanfs_get32(&p);
 	cyanfs_get_generic(&p, &h->uuid, sizeof(cyanfs_uuid_t));
 	h->version = cyanfs_get64(&p);
-	h->journal_id = cyanfs_get64(&p);
+	journal_id = cyanfs_get64(&p);
+	h->journal_id = 0;
 	h->journal_seq = cyanfs_get64(&p);
+	return journal_id;
 }
 
 struct cyanfs_journal_cursor {
@@ -152,12 +156,17 @@ static inline void cyanfs_journal_encode_header(uint8_t *p, struct cyanfs_journa
 	cyanfs_put8(&p, (h->size) >> CYANFS_JOURNAL_BLOCK_SHIFT);
 }
 
-static inline void cyanfs_journal_decode_header(uint8_t *p, struct cyanfs_journal_header *h)
+static inline cyanfs_status cyanfs_journal_decode_header_checked(uint8_t *p, uint64_t available,
+							 struct cyanfs_journal_header *h)
 {
+	if (available < CYANFS_JOURNAL_HEADER_SIZE)
+		return -CYANFS_ERR_INVAL;
+
 	h->crc32 = cyanfs_get32(&p);
 	h->seq = cyanfs_get64(&p);
 	h->count = cyanfs_get16(&p);
 	h->size = ((uint64_t)cyanfs_get8(&p)) << CYANFS_JOURNAL_BLOCK_SHIFT;
+	return 0;
 }
 
 static inline uint64_t cyanfs_journal_entry_size(cyanfs_journal_entry_type type)
@@ -225,46 +234,62 @@ static inline void cyanfs_journal_encode_entry(uint8_t **p, struct cyanfs_journa
 }
 
 // 应确保p指向的空间生命周期长于解析的journal entry
-static inline void cyanfs_journal_decode_entry(uint8_t **p, struct cyanfs_journal_entry *j)
+static inline cyanfs_status cyanfs_journal_decode_entry_checked(uint8_t **p, uint8_t *end,
+							struct cyanfs_journal_entry *j)
 {
-	j->type = cyanfs_get8(p);
+	uint8_t *cursor = *p;
+	cyanfs_journal_entry_type type;
+	uint64_t size;
+
+	if (cursor >= end)
+		return -CYANFS_ERR_INVAL;
+
+	type = cyanfs_get8(&cursor);
+	size = cyanfs_journal_entry_size(type);
+	if (!size || size > (uint64_t)(end - *p))
+		return -CYANFS_ERR_INVAL;
+
+	j->type = type;
 	switch (j->type) {
 	case CYANFS_JOURNAL_NEXT:
-		j->next.backend = cyanfs_get32(p);
+		j->next.backend = cyanfs_get32(&cursor);
 		break;
 	case CYANFS_JOURNAL_CREATE:
-		j->create.id = cyanfs_get64(p);
-		j->create.name = (void *)(*p);
-		*p += sizeof(cyanfs_file_name_t);
+		j->create.id = cyanfs_get64(&cursor);
+		j->create.name = (void *)cursor;
+		cursor += sizeof(cyanfs_file_name_t);
 		break;
 	case CYANFS_JOURNAL_TRUNCATE:
-		j->truncate.id = cyanfs_get64(p);
-		j->truncate.size = cyanfs_get64(p);
+		j->truncate.id = cyanfs_get64(&cursor);
+		j->truncate.size = cyanfs_get64(&cursor);
 		break;
 	case CYANFS_JOURNAL_FORK:
-		j->fork.id = cyanfs_get64(p);
-		j->fork.pid = cyanfs_get64(p);
-		j->fork.name = (void *)(*p);
-		*p += sizeof(cyanfs_file_name_t);
+		j->fork.id = cyanfs_get64(&cursor);
+		j->fork.pid = cyanfs_get64(&cursor);
+		j->fork.name = (void *)cursor;
+		cursor += sizeof(cyanfs_file_name_t);
 		break;
 	case CYANFS_JOURNAL_DELETE:
-		j->delete.id = cyanfs_get64(p);
+		j->delete.id = cyanfs_get64(&cursor);
 		break;
 	case CYANFS_JOURNAL_BIND:
-		j->bind.id = cyanfs_get64(p);
-		j->bind.file = cyanfs_get32(p);
-		j->bind.backend = cyanfs_get32(p);
+		j->bind.id = cyanfs_get64(&cursor);
+		j->bind.file = cyanfs_get32(&cursor);
+		j->bind.backend = cyanfs_get32(&cursor);
 		break;
 	case CYANFS_JOURNAL_UNBIND:
-		j->unbind.id = cyanfs_get64(p);
-		j->unbind.file = cyanfs_get32(p);
+		j->unbind.id = cyanfs_get64(&cursor);
+		j->unbind.file = cyanfs_get32(&cursor);
 		break;
 	case CYANFS_JOURNAL_RENAME:
-		j->rename.id = cyanfs_get64(p);
-		j->rename.name = (void *)(*p);
-		*p += sizeof(cyanfs_file_name_t);
+		j->rename.id = cyanfs_get64(&cursor);
+		j->rename.name = (void *)cursor;
+		cursor += sizeof(cyanfs_file_name_t);
 		break;
 	}
+
+	*p = cursor;
+	return 0;
 }
 
 #ifdef CYANFS_DEBUG_ENABLED
@@ -318,6 +343,13 @@ struct cyanfs_extent_set {
 	cyanfs_extent_id id[CYANFS_EXTENT_SET_LIIMT];
 };
 
+struct cyanfs_journal_visited_extent {
+	cyanfs_extent_id id;
+	CYANFS_RB_ENTRY(cyanfs_journal_visited_extent) node;
+};
+
+CYANFS_RB_HEAD(cyanfs_journal_visited_extents_rb, cyanfs_journal_visited_extent);
+
 struct cyanfs_task_journal_loader {
 	struct cyanfs_task base;
 	struct cyanfs_journal_cursor *cursor;
@@ -326,6 +358,7 @@ struct cyanfs_task_journal_loader {
 
 	struct cyanfs_extent_set static_journals;
 	struct cyanfs_list_head journals;
+	struct cyanfs_journal_visited_extents_rb visited_extents;
 
 	struct {
 		cyanfs_status (*parser)(struct cyanfs_task_journal_loader *t, struct cyanfs_journal_entry *j);
@@ -344,6 +377,7 @@ static inline void cyanfs_journal_loader_init(struct cyanfs_task_journal_loader 
 	t->static_journals.count = 0;
 	CYANFS_INIT_LIST_HEAD(&t->journals);
 	cyanfs_list_add_tail(&t->static_journals.node, &t->journals);
+	CYANFS_RB_INIT(&t->visited_extents);
 }
 
 int cyanfs_journal_loader_start(struct cyanfs_super *s, struct cyanfs_task_journal_loader *t);

@@ -306,6 +306,9 @@ static ssize_t cyanfs_backend_cmd_sync_store(struct config_item *item, const cha
 		return r;
 
 	flush_work(&backend->work);
+	r = cyanfs_super_status(backend->super);
+	if (r < 0)
+		return r;
 	return count;
 }
 

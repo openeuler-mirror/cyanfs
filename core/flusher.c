@@ -79,6 +79,8 @@ void __cyanfs_super_discard_extent(struct cyanfs_super *s, struct cyanfs_extent_
 
 struct cyanfs_task_super_flusher {
 	int flush_before_write;
+	int ondisk;
+	struct cyanfs_backend_extents_rb unused_extents;
 	struct cyanfs_task before;
 	struct cyanfs_task after;
 	struct cyanfs_task free;
@@ -88,6 +90,26 @@ struct cyanfs_task_super_flusher {
 static void cyanfs_super_flusher_free(struct cyanfs_task *base, cyanfs_status err)
 {
 	struct cyanfs_task_super_flusher *t = cyanfs_container_of(base, struct cyanfs_task_super_flusher, free);
+	struct cyanfs_super *s = base->super;
+	struct cyanfs_extent_node *n, *next;
+
+	if (CYANFS_RB_EMPTY(&t->unused_extents)) {
+		cyanfs_free(t);
+		return;
+	}
+
+	cyanfs_write_lock(&s->files_lock);
+	s->flags |= CYANFS_SUPER_FLAG_FLUSH;
+	if (CYANFS_RB_EMPTY(&s->unused_extents)) {
+		s->unused_extents = t->unused_extents;
+		CYANFS_RB_INIT(&t->unused_extents);
+	} else {
+		CYANFS_RB_FOREACH_SAFE(n, cyanfs_backend_extents_rb, &t->unused_extents, next)
+		{
+			__cyanfs_extent_super_to_super(s, n, &t->unused_extents, &s->unused_extents);
+		}
+	}
+	cyanfs_write_unlock(&s->files_lock);
 	cyanfs_free(t);
 }
 
@@ -96,8 +118,17 @@ static void cyanfs_super_flusher_after_flush(struct cyanfs_task *t, cyanfs_statu
 	struct cyanfs_super *s = t->super;
 	struct cyanfs_extent_node *n, *next;
 
+	if (err) {
+		cyanfs_super_mark_error(s);
+		return;
+	}
+
+	cyanfs_write_lock(&s->files_lock);
+	if (s->flags & CYANFS_SUPER_FLAG_ERROR) {
+		cyanfs_write_unlock(&s->files_lock);
+		return;
+	}
 	if (!CYANFS_RB_EMPTY(&s->flush_extents)) {
-		cyanfs_write_lock(&s->files_lock);
 		if (cyanfs_atomic_read(&s->writers[!s->writer_current_id])) {
 			s->flags |= CYANFS_SUPER_FLAG_FLUSH;
 		} else {
@@ -106,37 +137,82 @@ static void cyanfs_super_flusher_after_flush(struct cyanfs_task *t, cyanfs_statu
 				__cyanfs_super_discard_extent(s, n, &s->flush_extents);
 			}
 		}
-		cyanfs_write_unlock(&s->files_lock);
 	}
-	if (err) {
-		cyanfs_super_mark_error(s);
-	} else {
-		s->journal_cursor.extent_id_ondisk = s->journal_cursor.extent_id_flush;
-	}
+	s->journal_cursor.extent_id_ondisk = s->journal_cursor.extent_id_flush;
+	cyanfs_write_unlock(&s->files_lock);
 }
 
-static void cyanfs_super_flusher_before_flush(struct cyanfs_task *t, cyanfs_status err)
+static void cyanfs_super_flusher_before_flush(struct cyanfs_task *base, cyanfs_status err)
 {
-	struct cyanfs_super *s = t->super;
+	struct cyanfs_task_super_flusher *t =
+		cyanfs_container_of(base, struct cyanfs_task_super_flusher, after);
+	struct cyanfs_super *s = base->super;
 
 	cyanfs_write_lock(&s->files_lock);
-	if (CYANFS_RB_EMPTY(&s->flush_extents)) {
-		s->flush_extents = s->unused_extents;
-		CYANFS_RB_INIT(&s->unused_extents);
+	if (s->flags & CYANFS_SUPER_FLAG_ERROR) {
+		cyanfs_write_unlock(&s->files_lock);
+		return;
+	}
+	if (CYANFS_RB_EMPTY(&s->flush_extents) && !CYANFS_RB_EMPTY(&t->unused_extents)) {
+		s->flush_extents = t->unused_extents;
+		CYANFS_RB_INIT(&t->unused_extents);
+		s->writer_current_id = !s->writer_current_id;
+	}
+	s->journal_cursor.extent_id_flush = s->journal_cursor.extent_id;
+	cyanfs_write_unlock(&s->files_lock);
+
+	cyanfs_task_init(s, base, CYANFS_TASK_FLUSH, cyanfs_super_flusher_after_flush);
+	cyanfs_super_task_add_head(base);
+}
+
+static void cyanfs_super_flusher_before_write_flush_done(struct cyanfs_task *base, cyanfs_status err)
+{
+	struct cyanfs_task_super_flusher *t =
+		cyanfs_container_of(base, struct cyanfs_task_super_flusher, before);
+	struct cyanfs_super *s = base->super;
+
+	cyanfs_write_lock(&s->files_lock);
+	if (err)
+		__cyanfs_super_mark_error(s);
+	if (s->flags & CYANFS_SUPER_FLAG_ERROR)
+		t->writer.base.type = CYANFS_TASK_NOP;
+	cyanfs_write_unlock(&s->files_lock);
+}
+
+static void cyanfs_super_flusher_before_write_flush(struct cyanfs_task *base, cyanfs_status err)
+{
+	struct cyanfs_task_super_flusher *t =
+		cyanfs_container_of(base, struct cyanfs_task_super_flusher, before);
+	struct cyanfs_super *s = base->super;
+
+	cyanfs_write_lock(&s->files_lock);
+	if (s->flags & CYANFS_SUPER_FLAG_ERROR) {
+		t->writer.base.type = CYANFS_TASK_NOP;
+		cyanfs_write_unlock(&s->files_lock);
+		return;
+	}
+	if (CYANFS_RB_EMPTY(&s->flush_extents) && !CYANFS_RB_EMPTY(&t->unused_extents)) {
+		s->flush_extents = t->unused_extents;
+		CYANFS_RB_INIT(&t->unused_extents);
 		s->writer_current_id = !s->writer_current_id;
 	}
 	cyanfs_write_unlock(&s->files_lock);
 
-	s->journal_cursor.extent_id_flush = s->journal_cursor.extent_id;
-
-	cyanfs_task_init(s, t, CYANFS_TASK_FLUSH, cyanfs_super_flusher_after_flush);
-	cyanfs_super_task_add_head(t);
+	cyanfs_task_init(s, base, CYANFS_TASK_FLUSH, cyanfs_super_flusher_before_write_flush_done);
+	cyanfs_super_task_add_head(base);
 }
 
 static void cyanfs_super_flusher_write_error(struct cyanfs_task_journal_writer *writer)
 {
 	struct cyanfs_super *s = writer->base.super;
+
 	cyanfs_super_mark_error(s);
+	while (!cyanfs_list_empty(&writer->head)) {
+		struct cyanfs_journal_entry *j =
+			cyanfs_list_first_entry(&writer->head, struct cyanfs_journal_entry, list);
+		cyanfs_list_del(&j->list);
+		cyanfs_journal_free(j);
+	}
 }
 
 static void cyanfs_super_flusher_flush_before_write(struct cyanfs_task_journal_writer *writer)
@@ -148,17 +224,21 @@ static void cyanfs_super_flusher_flush_before_write(struct cyanfs_task_journal_w
 		return;
 	t->flush_before_write = 1;
 
-	cyanfs_task_init(s, &t->before, CYANFS_TASK_NOP, cyanfs_super_flusher_before_flush);
+	cyanfs_task_init(s, &t->before, CYANFS_TASK_NOP, cyanfs_super_flusher_before_write_flush);
 	cyanfs_super_task_add_head(&t->before);
 }
 
 static void cyanfs_super_flusher_write_finish(struct cyanfs_task_journal_writer *writer)
 {
+	struct cyanfs_task_super_flusher *t = cyanfs_container_of(writer, struct cyanfs_task_super_flusher, writer);
 	struct cyanfs_super *s = writer->base.super;
 	struct cyanfs_super_meta *m = &s->meta;
 	uint32_t limit;
 	int compact = 0;
 	int flush = s->journal_cursor.extent_id != s->journal_cursor.extent_id_ondisk;
+
+	if (t->flush_before_write && !t->ondisk)
+		flush = 1;
 
 	cyanfs_read_lock(&s->files_lock);
 	limit = m->free_extents >> 10;
@@ -198,9 +278,15 @@ cyanfs_status cyanfs_super_flusher_start(struct cyanfs_super *s, uint32_t min_jo
 	if (!t)
 		return -CYANFS_ERR_NOMEM;
 	t->flush_before_write = 0;
+	t->ondisk = ondisk;
+	CYANFS_RB_INIT(&t->unused_extents);
 
 	cyanfs_write_lock(&s->files_lock);
 	no_journal = cyanfs_list_empty(&s->journal_head);
+	if (ondisk || !no_journal) {
+		t->unused_extents = s->unused_extents;
+		CYANFS_RB_INIT(&s->unused_extents);
+	}
 	if (!no_journal) {
 		cyanfs_journal_writer_init(&t->writer);
 		cyanfs_list_splice_tail_init(&s->journal_head, &t->writer.head);

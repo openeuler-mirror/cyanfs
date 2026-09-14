@@ -297,6 +297,22 @@ int cyanfs_super_is_ready(struct cyanfs_super *s)
 	return s->flags & CYANFS_SUPER_FLAG_READY;
 }
 
+cyanfs_status cyanfs_super_status(struct cyanfs_super *s)
+{
+	cyanfs_status err;
+
+	cyanfs_read_lock(&s->files_lock);
+	err = __cyanfs_super_ensure_status(s);
+	cyanfs_read_unlock(&s->files_lock);
+
+	return err;
+}
+
+cyanfs_status cyanfs_file_status(struct cyanfs_file *f)
+{
+	return cyanfs_super_status(f->super);
+}
+
 struct cyanfs_task *cyanfs_super_get_task(struct cyanfs_super *s)
 {
 	struct cyanfs_task *t = NULL;
