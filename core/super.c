@@ -242,7 +242,7 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 		__cyanfs_init_file(s, f, *j->create.name, j->create.id, NULL);
 		return 0;
 	case CYANFS_JOURNAL_TRUNCATE:
-		f = __cyanfs_lookup_file_by_id(s, j->bind.id);
+		f = __cyanfs_lookup_file_by_id(s, j->truncate.id);
 		if (!f)
 			return -CYANFS_ERR_INVAL;
 		return __cyanfs_file_truncate(f, j->truncate.size);
