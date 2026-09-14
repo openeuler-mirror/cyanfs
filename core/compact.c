@@ -294,8 +294,10 @@ void cyanfs_super_compact(struct cyanfs_super *s)
 	t->base.super = s;
 
 	t->compact.journal_cursor.page = cyanfs_malloc(CYANFS_JOURNAL_PAGE_SIZE);
-	if (!t->compact.journal_cursor.page)
+	if (!t->compact.journal_cursor.page) {
+		cyanfs_free(t);
 		goto err;
+	}
 
 	CYANFS_DEBUG("compact start");
 
