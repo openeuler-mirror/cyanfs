@@ -49,6 +49,10 @@ extern "C" {
 #define CYANFS_FILE_ALIGN_SIZE (1ULL << 12)
 #define CYANFS_FILE_ALIGN_MASK (CYANFS_FILE_ALIGN_SIZE - 1ULL)
 
+/* Shared with core/core.h without requiring it for standalone UAPI users. */
+#ifndef __CYANFS_FILE_META_TYPES_DEFINED__
+#define __CYANFS_FILE_META_TYPES_DEFINED__
+
 typedef uint64_t cyanfs_file_id_t;
 
 typedef struct {
@@ -65,7 +69,11 @@ struct cyanfs_file_meta {
 	uint32_t children;
 };
 
-const static struct cyanfs_file_meta cyanfs_list_init_iter = { 0 };
+static const struct cyanfs_file_meta cyanfs_list_init_iter = { 0 };
+#endif
+
+#ifndef __CYANFS_SUPER_META_TYPES_DEFINED__
+#define __CYANFS_SUPER_META_TYPES_DEFINED__
 
 typedef struct {
 	uint32_t data[4];
@@ -81,6 +89,7 @@ struct cyanfs_super_meta {
 	uint64_t size;
 	uint32_t files;
 };
+#endif
 #endif
 
 static inline int cyanfs_file_name_copy(cyanfs_file_name_t *dst, const char *src)
