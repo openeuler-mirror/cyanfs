@@ -30,7 +30,7 @@ static inline int cyanfs_journal_visited_extent_compare(struct cyanfs_journal_vi
 }
 
 CYANFS_RB_GENERATE_INTERNAL(cyanfs_journal_visited_extents_rb, cyanfs_journal_visited_extent, node,
-				    cyanfs_journal_visited_extent_compare, static inline)
+				    cyanfs_journal_visited_extent_compare, static inline __attribute__((unused)))
 
 struct cyanfs_journal_loader_follow {
 	cyanfs_extent_id id;
