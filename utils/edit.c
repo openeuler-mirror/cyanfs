@@ -965,10 +965,13 @@ static int do_batch(struct disk *disk, int argc, const char *argv[])
 		char *line = NULL;
 		size_t n;
 
+		errno = 0;
 		if (getline(&line, &n, file) <= 0) {
+			r = errno ? -errno : -EIO;
+			if (feof(file) && !ferror(file))
+				r = 0;
 			if (line)
 				free(line);
-			r = -errno;
 			break;
 		}
 		c = split_line(line, v, sizeof(v) / sizeof(v[0]));
