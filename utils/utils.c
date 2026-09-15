@@ -106,7 +106,9 @@ int stat_device_size(int fd, uint64_t *size)
 		*size = stat.st_size;
 		return 0;
 	} else if (S_ISBLK(stat.st_mode)) {
-		return ioctl(fd, BLKGETSIZE64, size);
+		if (ioctl(fd, BLKGETSIZE64, size) < 0)
+			return -errno;
+		return 0;
 	} else {
 		return -EINVAL;
 	}
