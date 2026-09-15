@@ -505,6 +505,11 @@ static int do_write(struct disk *disk, int argc, const char *argv[])
 	return r;
 }
 
+static int valid_file_range(uint64_t offset, uint64_t length, uint64_t size)
+{
+	return offset <= size && length <= size - offset;
+}
+
 static int __do_fill(struct disk *disk, int v, int argc, const char *argv[])
 {
 	cyanfs_file_name_t name = { 0 };
@@ -529,7 +534,7 @@ static int __do_fill(struct disk *disk, int v, int argc, const char *argv[])
 	r = cyanfs_open(disk->super, meta.id, 1, &file);
 	if (r < 0)
 		return r;
-	if (offset + length > meta.size) {
+	if (!valid_file_range(offset, length, meta.size)) {
 		r = -EINVAL;
 		goto close;
 	}
@@ -586,7 +591,7 @@ static int __do_check(struct disk *disk, int v, int argc, const char *argv[])
 	r = cyanfs_open(disk->super, meta.id, 0, &file);
 	if (r < 0)
 		return r;
-	if (offset + length > meta.size) {
+	if (!valid_file_range(offset, length, meta.size)) {
 		r = -EINVAL;
 		goto close;
 	}
@@ -644,7 +649,7 @@ static int do_discard(struct disk *disk, int argc, const char *argv[])
 	r = cyanfs_open(disk->super, meta.id, 1, &file);
 	if (r < 0)
 		return r;
-	if (offset + length > meta.size) {
+	if (!valid_file_range(offset, length, meta.size)) {
 		r = -EINVAL;
 		goto close;
 	}
