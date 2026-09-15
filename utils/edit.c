@@ -292,7 +292,6 @@ static int do_extents(struct disk *disk, int argc, const char *argv[])
 }
 
 struct requeue_ctx {
-	struct disk *disk;
 	int done;
 	pthread_cond_t cond;
 	pthread_mutex_t lock;
@@ -301,10 +300,40 @@ struct requeue_ctx {
 static void requeue_done(void *c)
 {
 	struct requeue_ctx *ctx = c;
-	pthread_mutex_lock(&ctx->lock);
+	CYANFS_BUG_ON(pthread_mutex_lock(&ctx->lock));
 	ctx->done = 1;
-	pthread_cond_signal(&ctx->cond);
-	pthread_mutex_unlock(&ctx->lock);
+	CYANFS_BUG_ON(pthread_cond_signal(&ctx->cond));
+	CYANFS_BUG_ON(pthread_mutex_unlock(&ctx->lock));
+}
+
+static int wait_requeue(struct cyanfs_file *file)
+{
+	struct requeue_ctx ctx = { .done = 0 };
+	int err;
+
+	err = pthread_mutex_init(&ctx.lock, NULL);
+	if (err)
+		return -err;
+	err = pthread_cond_init(&ctx.cond, NULL);
+	if (err) {
+		err = -err;
+		goto destroy_mutex;
+	}
+	err = cyanfs_requeue(file, &ctx, requeue_done);
+	if (err)
+		goto destroy_cond;
+
+	/* Once queued, the callback owns a reference to this stack context. */
+	CYANFS_BUG_ON(pthread_mutex_lock(&ctx.lock));
+	while (!ctx.done)
+		CYANFS_BUG_ON(pthread_cond_wait(&ctx.cond, &ctx.lock));
+	CYANFS_BUG_ON(pthread_mutex_unlock(&ctx.lock));
+
+destroy_cond:
+	CYANFS_BUG_ON(pthread_cond_destroy(&ctx.cond));
+destroy_mutex:
+	CYANFS_BUG_ON(pthread_mutex_destroy(&ctx.lock));
+	return err;
 }
 
 const int io_op_read = 0;
@@ -325,7 +354,6 @@ static int do_io_partial(cyanfs_map_type_t type, uint64_t offset, uint64_t len, 
 {
 	struct ioctx *ctx = c;
 	struct disk *disk = ctx->disk;
-	struct requeue_ctx requeue = { .disk = disk, .done = 0 };
 	int err = -EIO;
 
 	switch (type) {
@@ -343,14 +371,9 @@ static int do_io_partial(cyanfs_map_type_t type, uint64_t offset, uint64_t len, 
 			CYANFS_BUG_ON(1);
 		break;
 	case CYANFS_MAP_REQUEUE:
-		pthread_cond_init(&requeue.cond, NULL);
-		pthread_mutex_init(&requeue.lock, NULL);
-		err = cyanfs_requeue(ctx->file, &requeue, requeue_done);
-		pthread_mutex_lock(&requeue.lock);
-		if (!requeue.done)
-			pthread_cond_wait(&requeue.cond, &requeue.lock);
-		pthread_mutex_unlock(&requeue.lock);
-		err = do_io(disk, ctx->file, ctx->op, ctx->offset, len, ctx->buffer);
+		err = wait_requeue(ctx->file);
+		if (!err)
+			err = do_io(disk, ctx->file, ctx->op, ctx->offset, len, ctx->buffer);
 		break;
 	default:
 		CYANFS_BUG_ON(1);
