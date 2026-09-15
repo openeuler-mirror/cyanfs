@@ -45,7 +45,7 @@ typedef UINT64 uint64_t;
 	do {                                                                                                           \
 		if (cond) {                                                                                            \
 			AsciiPrint("CYANFS_BUG_ON: %a:%d\n", __func__, __LINE__);                                      \
-			*((uint8_t *)0) = 0;                                                                           \
+			CpuDeadLoop();                                                                                 \
 		}                                                                                                      \
 	} while (0)
 

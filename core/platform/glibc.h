@@ -33,7 +33,7 @@
 #define CYANFS_BUG_ON(cond)                                                                                            \
 	do {                                                                                                           \
 		if (cond)                                                                                              \
-			*((uint8_t *)0) = 0;                                                                           \
+			abort();                                                                                       \
 	} while (0)
 
 #define cyanfs_malloc(size) malloc((size))
