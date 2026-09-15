@@ -64,6 +64,8 @@ int safe_pwrite(int fd, void *buf, off_t offset, size_t count)
 			if (errno == EINTR)
 				continue;
 			return -errno;
+		} else if (n == 0) {
+			return -EIO;
 		}
 		buf = ((char *)buf) + n;
 		offset += n;
@@ -82,6 +84,8 @@ int safe_write(int fd, void *buf, size_t count)
 			if (errno == EINTR)
 				continue;
 			return -errno;
+		} else if (n == 0) {
+			return -EIO;
 		}
 		buf = ((char *)buf) + n;
 		c -= n;
