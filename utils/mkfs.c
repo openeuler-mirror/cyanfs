@@ -32,11 +32,11 @@ int main(int argc, const char *argv[])
 		return -1;
 	}
 	r = safe_read(fd, &uuid, sizeof(uuid));
+	close(fd);
 	if (r < 0) {
 		fprintf(stderr, "failed to read urandom device\n");
 		return -1;
 	}
-	close(fd);
 
 	fd = open(argv[1], O_RDWR | O_EXCL | O_SYNC, 0);
 	if (fd < 0) {
@@ -45,11 +45,11 @@ int main(int argc, const char *argv[])
 	}
 	cyanfs_super_make(uuid, block);
 	r = safe_pwrite(fd, block, 0, CYANFS_SUPER_BLOCK_SIZE);
+	close(fd);
 	if (r < 0) {
 		fprintf(stderr, "failed to write super block\n");
 		return -1;
 	}
-	close(fd);
 
 	printf("mkfs done.\n");
 	return 0;

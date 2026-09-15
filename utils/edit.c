@@ -107,11 +107,11 @@ static int do_mkfs(struct disk *disk, int argc, const char *argv[])
 		return r;
 	}
 	r = safe_read(fd, &uuid, sizeof(uuid));
+	close(fd);
 	if (r < 0) {
 		fprintf(stderr, "failed to read urandom device\n");
 		return r;
 	}
-	close(fd);
 
 	cyanfs_super_make(uuid, block);
 	r = safe_pwrite(disk->fd, block, 0, CYANFS_SUPER_BLOCK_SIZE);

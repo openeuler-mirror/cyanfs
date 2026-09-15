@@ -33,11 +33,11 @@ int main(int argc, const char *argv[])
 		return -1;
 	}
 	r = safe_pread(fd, block, 0, CYANFS_SUPER_BLOCK_SIZE);
+	close(fd);
 	if (r < 0) {
 		fprintf(stderr, "failed to read super block\n");
 		return -1;
 	}
-	close(fd);
 
 	r = cyanfs_super_parse(&h, block);
 	if (r < 0) {
