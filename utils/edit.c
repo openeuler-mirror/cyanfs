@@ -927,6 +927,25 @@ static int is_space(char ch)
 	}
 }
 
+static int split_line(char *line, const char *argv[], int capacity)
+{
+	char *p = line;
+	int argc = 0;
+
+	while (is_space(*p))
+		++p;
+	while (*p) {
+		if (argc == capacity)
+			return -E2BIG;
+		argv[argc++] = p;
+		while (*p && !is_space(*p))
+			++p;
+		while (is_space(*p))
+			*(p++) = 0;
+	}
+	return argc;
+}
+
 static int do_batch(struct disk *disk, int argc, const char *argv[])
 {
 	FILE *file = stdin;
@@ -944,7 +963,6 @@ static int do_batch(struct disk *disk, int argc, const char *argv[])
 		int c = 0;
 		const char *v[1024];
 		char *line = NULL;
-		char *p;
 		size_t n;
 
 		if (getline(&line, &n, file) <= 0) {
@@ -953,22 +971,13 @@ static int do_batch(struct disk *disk, int argc, const char *argv[])
 			r = -errno;
 			break;
 		}
-		p = line;
-
-		while (*p == ' ' || is_space(*p))
-			++p;
-		if (!*p)
+		c = split_line(line, v, sizeof(v) / sizeof(v[0]));
+		if (c < 0) {
+			r = c;
 			goto skip;
-
-		do {
-			v[c++] = p;
-			while (*p && !is_space(*p))
-				++p;
-			while (is_space(*p))
-				*(p++) = 0;
-		} while (*p);
-
-		r = call_fn(disk, c, v);
+		}
+		if (c)
+			r = call_fn(disk, c, v);
 
 	skip:
 		free(line);
