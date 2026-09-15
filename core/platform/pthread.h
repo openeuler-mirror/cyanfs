@@ -54,9 +54,14 @@ struct cyanfs_rwlock {
 	pthread_rwlock_t l;
 };
 
-static inline void cyanfs_init_rwlock(struct cyanfs_rwlock *lock)
+static inline int cyanfs_init_rwlock(struct cyanfs_rwlock *lock)
 {
-	pthread_rwlock_init(&lock->l, 0);
+	return pthread_rwlock_init(&lock->l, 0);
+}
+
+static inline void cyanfs_destroy_rwlock(struct cyanfs_rwlock *lock)
+{
+	CYANFS_BUG_ON(pthread_rwlock_destroy(&lock->l));
 }
 
 static inline void cyanfs_read_lock(struct cyanfs_rwlock *lock)
@@ -83,9 +88,14 @@ struct cyanfs_lock {
 	pthread_mutex_t l;
 };
 
-static inline void cyanfs_init_lock(struct cyanfs_lock *lock)
+static inline int cyanfs_init_lock(struct cyanfs_lock *lock)
 {
-	pthread_mutex_init(&lock->l, 0);
+	return pthread_mutex_init(&lock->l, 0);
+}
+
+static inline void cyanfs_destroy_lock(struct cyanfs_lock *lock)
+{
+	CYANFS_BUG_ON(pthread_mutex_destroy(&lock->l));
 }
 
 static inline void cyanfs_lock(struct cyanfs_lock *lock)

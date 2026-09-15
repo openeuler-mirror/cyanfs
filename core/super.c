@@ -400,7 +400,10 @@ struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact)
 	if (!s)
 		goto out;
 
-	cyanfs_init_rwlock(&s->files_lock);
+	if (cyanfs_init_rwlock(&s->files_lock))
+		goto super_out;
+	if (cyanfs_init_lock(&s->task_lock))
+		goto rwlock_out;
 	CYANFS_RB_INIT(&s->files_by_id);
 	CYANFS_RB_INIT(&s->files_by_name);
 	CYANFS_RB_INIT(&s->free_extents);
@@ -411,7 +414,6 @@ struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact)
 	CYANFS_RB_INIT(&s->journal_extents);
 	CYANFS_INIT_LIST_HEAD(&s->journal_head);
 	s->journal_count = 0;
-	cyanfs_init_lock(&s->task_lock);
 	CYANFS_INIT_LIST_HEAD(&s->task_head);
 	s->max_file_id = 0;
 	s->new_task = NULL;
@@ -472,6 +474,10 @@ extents_alloc:
 		CYANFS_RB_REMOVE(cyanfs_backend_extents_rb, &s->free_extents, n);
 		cyanfs_free(n);
 	}
+	cyanfs_destroy_lock(&s->task_lock);
+rwlock_out:
+	cyanfs_destroy_rwlock(&s->files_lock);
+super_out:
 	cyanfs_free(s);
 out:
 	return NULL;
@@ -525,6 +531,8 @@ void cyanfs_super_close(struct cyanfs_super *s)
 		CYANFS_RB_REMOVE(cyanfs_backend_extents_rb, &s->free_extents, n);
 		cyanfs_free(n);
 	}
+	cyanfs_destroy_lock(&s->task_lock);
+	cyanfs_destroy_rwlock(&s->files_lock);
 	cyanfs_free(s);
 }
 

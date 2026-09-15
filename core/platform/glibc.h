@@ -50,7 +50,12 @@
 
 struct cyanfs_rwlock {};
 
-static inline void cyanfs_init_rwlock(struct cyanfs_rwlock *lock)
+static inline int cyanfs_init_rwlock(struct cyanfs_rwlock *lock)
+{
+	return 0;
+}
+
+static inline void cyanfs_destroy_rwlock(struct cyanfs_rwlock *lock)
 {
 }
 
@@ -72,7 +77,12 @@ static inline void cyanfs_write_unlock(struct cyanfs_rwlock *lock)
 
 struct cyanfs_lock {};
 
-static inline void cyanfs_init_lock(struct cyanfs_lock *lock)
+static inline int cyanfs_init_lock(struct cyanfs_lock *lock)
+{
+	return 0;
+}
+
+static inline void cyanfs_destroy_lock(struct cyanfs_lock *lock)
 {
 }
 

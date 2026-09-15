@@ -51,9 +51,14 @@ struct cyanfs_rwlock {
 	rwlock_t l;
 };
 
-static inline void cyanfs_init_rwlock(struct cyanfs_rwlock *lock)
+static inline int cyanfs_init_rwlock(struct cyanfs_rwlock *lock)
 {
 	rwlock_init(&lock->l);
+	return 0;
+}
+
+static inline void cyanfs_destroy_rwlock(struct cyanfs_rwlock *lock)
+{
 }
 
 static inline void cyanfs_read_lock(struct cyanfs_rwlock *lock)
@@ -80,9 +85,14 @@ struct cyanfs_lock {
 	spinlock_t l;
 };
 
-static inline void cyanfs_init_lock(struct cyanfs_lock *lock)
+static inline int cyanfs_init_lock(struct cyanfs_lock *lock)
 {
 	spin_lock_init(&lock->l);
+	return 0;
+}
+
+static inline void cyanfs_destroy_lock(struct cyanfs_lock *lock)
+{
 }
 
 static inline void cyanfs_lock(struct cyanfs_lock *lock)
