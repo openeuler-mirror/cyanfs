@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -exo pipefail
 
 ROOT_DIR="$(readlink -f "$(dirname "$0")/../")"
 pushd ${ROOT_DIR}
@@ -17,9 +17,10 @@ echo -n | awk 'BEGIN{
 }' | $CMD $DISK batch -
 
 $CMD $DISK fill foo 0 104857600 && exit 1
-if [ "$($CMD $DISK statfs | awk '{print $1}')" == "0" ]; then
-  exit 1
-fi
+"$CMD" "$DISK" statfs | awk '
+  NR == 2 { valid = ($1 ~ /^[0-9]+$/ && $1 > 0); }
+  END { exit !valid; }
+'
 
 echo -n | awk 'BEGIN{
   printf("disable-debug\n");
