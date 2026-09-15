@@ -439,6 +439,7 @@ struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact)
 	}
 	s->meta.free_extents = s->meta.total_extents;
 	s->meta.journal_extents = 0;
+	s->meta.data_extents = 0;
 	s->meta.size = size;
 	s->meta.files = 0;
 	s->meta.reserved_extents = ({

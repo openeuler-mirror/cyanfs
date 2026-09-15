@@ -308,6 +308,11 @@ void cyanfs_super_compact(struct cyanfs_super *s)
 	CYANFS_RB_INIT(&t->compact.journal_extents);
 	t->compact.max_file_id = 0;
 	t->compact.flags = 0;
+	t->compact.meta.total_extents = s->meta.total_extents;
+	t->compact.meta.free_extents = t->compact.meta.total_extents;
+	t->compact.meta.journal_extents = 0;
+	t->compact.meta.data_extents = 0;
+	t->compact.meta.files = 0;
 	for (i = 0; i < s->meta.total_extents; i++) {
 		n = cyanfs_malloc(sizeof(struct cyanfs_extent_node));
 		if (!n)
