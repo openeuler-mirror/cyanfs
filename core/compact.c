@@ -229,6 +229,10 @@ static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_load
 		CYANFS_DEBUG("compact journal entry count exceeds sequence.");
 		goto err;
 	}
+	if (t->header.version == ~(uint64_t)0) {
+		CYANFS_DEBUG("compact super header version is exhausted.");
+		goto err;
+	}
 	t->header.journal_seq = t->compact.journal_cursor.seq - count;
 	++t->header.version;
 

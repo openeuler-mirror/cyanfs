@@ -65,7 +65,8 @@ static void do_loop(struct disk *disk)
 			}
 			break;
 		case CYANFS_TASK_FLUSH:
-			fsync(disk->fd);
+			if (fsync(disk->fd) < 0)
+				err = -errno;
 			break;
 		case CYANFS_TASK_DISCARD:
 			break;

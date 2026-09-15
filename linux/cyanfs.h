@@ -25,6 +25,8 @@
 #include <linux/configfs.h>
 #include <linux/workqueue.h>
 #include <linux/kref.h>
+#include <linux/list.h>
+#include <linux/spinlock.h>
 #include <linux/miscdevice.h>
 #include <linux/mutex.h>
 
@@ -78,6 +80,8 @@ struct cyanfs_backend {
 #endif
 	struct block_device *dev;
 	struct work_struct work;
+	spinlock_t sync_waiters_lock;
+	struct list_head sync_waiters;
 	struct bio_vec bvecs[CYANFS_BIO_MAX_VECS];
 	struct delayed_work flush_work;
 
@@ -93,6 +97,8 @@ struct cyanfs_backend {
 extern struct cyanfs_backend *cyanfs_backend_open(dev_t dev);
 extern void cyanfs_backend_get(struct cyanfs_backend *backend);
 extern void cyanfs_backend_put(struct cyanfs_backend *backend);
+extern int cyanfs_backend_wait_tasks(struct cyanfs_backend *backend);
+extern int cyanfs_backend_sync(struct cyanfs_backend *backend);
 
 extern void cyanfs_file_submit_bio(struct cyanfs_file *file, struct cyanfs_backend *backend, struct bio *bio);
 
