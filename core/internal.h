@@ -39,16 +39,23 @@ static inline cyanfs_extent_id cyanfs_extent_from(uint64_t off)
 	return id;
 }
 
-static inline uint64_t cyanfs_extent_align(uint64_t size)
+static inline cyanfs_status __cyanfs_file_size_validate(uint64_t size)
 {
-	return (size + CYANFS_EXTENT_MASK) & (~CYANFS_EXTENT_MASK);
+	uint64_t extent_count = size / CYANFS_EXTENT_SIZE;
+
+	if (size % CYANFS_EXTENT_SIZE)
+		++extent_count;
+	if ((size & CYANFS_FILE_ALIGN_MASK) || extent_count > CYANFS_EXTENT_COUNT_MAX)
+		return -CYANFS_ERR_INVAL;
+
+	return 0;
 }
 
 struct cyanfs_extent {
-	cyanfs_extent_id backend : 30;
+	cyanfs_extent_id backend : CYANFS_EXTENT_INDEX_BITS;
 	int map : 1; // 是否对应底层磁盘已分配的extent
 	int pending : 1; // 该extent正在写入，需挂起新的IO
-	cyanfs_extent_id file : 30;
+	cyanfs_extent_id file : CYANFS_EXTENT_INDEX_BITS;
 	int error : 1; // 该extent存在IO问题
 };
 
@@ -119,6 +126,22 @@ static inline int __cyanfs_file_id_compare(struct cyanfs_file *a, struct cyanfs_
 CYANFS_RB_GENERATE_INTERNAL(cyanfs_files_id_rb, cyanfs_file, id_node, __cyanfs_file_id_compare, static inline)
 
 CYANFS_RB_HEAD(cyanfs_files_name_rb, cyanfs_file);
+
+static inline cyanfs_status __cyanfs_file_name_normalize(cyanfs_file_name_t *name)
+{
+	uint32_t i;
+
+	if (!name->data[0] || name->zero)
+		return -CYANFS_ERR_INVAL;
+
+	for (i = 1; i < sizeof(name->data) && name->data[i]; ++i)
+		;
+	for (; i < sizeof(name->data); ++i)
+		name->data[i] = 0;
+	name->zero = 0;
+
+	return 0;
+}
 
 static inline int __cyanfs_file_name_compare(struct cyanfs_file *a, struct cyanfs_file *b)
 {

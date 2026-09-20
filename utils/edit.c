@@ -237,7 +237,10 @@ static int do_truncate(struct disk *disk, int argc, const char *argv[])
 		return r;
 	if (sscanf(argv[1], "%" PRIu64, &size) != 1)
 		return -EINVAL;
-	r = cyanfs_truncate(disk->super, meta.id, (size + CYANFS_FILE_ALIGN_MASK) & ~CYANFS_FILE_ALIGN_MASK);
+	if (size > CYANFS_FILE_MAX_SIZE)
+		return -EINVAL;
+	size = (size + CYANFS_FILE_ALIGN_MASK) & ~CYANFS_FILE_ALIGN_MASK;
+	r = cyanfs_truncate(disk->super, meta.id, size);
 	if (r < 0)
 		return r;
 	return 0;
@@ -714,12 +717,13 @@ close_super:
 	return r;
 }
 
-static void closefs(struct disk *disk)
+static int closefs(struct disk *disk)
 {
 	void *thread_ret;
+	int r, status;
 
 	if (!disk->super)
-		return;
+		return 0;
 	pthread_mutex_lock(&disk->lock);
 	disk->terminated = 1;
 	pthread_cond_signal(&disk->cond);
@@ -727,12 +731,16 @@ static void closefs(struct disk *disk)
 	pthread_join(disk->thread, &thread_ret);
 	CYANFS_DEBUG("thread quit");
 	cyanfs_super_set_new_task_callback(disk->super, NULL, NULL);
-	cyanfs_super_flush(disk->super, 1);
+	r = cyanfs_super_flush(disk->super, 1);
 	do_loop(disk);
+	status = cyanfs_super_status(disk->super);
 	cyanfs_super_close(disk->super);
 	disk->super = NULL;
 	pthread_cond_destroy(&disk->cond);
 	pthread_mutex_destroy(&disk->lock);
+	if (!r && status < 0)
+		r = status;
+	return r;
 }
 
 static int do_mount(struct disk *disk, int argc, const char *argv[])
@@ -743,8 +751,7 @@ static int do_mount(struct disk *disk, int argc, const char *argv[])
 
 static int do_umount(struct disk *disk, int argc, const char *argv[])
 {
-	closefs(disk);
-	return 0;
+	return closefs(disk);
 }
 
 static int do_batch(struct disk *disk, int argc, const char *argv[]);
@@ -986,7 +993,7 @@ static void usage(const char *exe)
 int main(int argc, const char *argv[])
 {
 	struct disk disk;
-	int r;
+	int r, close_r, sync_r = 0, fd_close_r = 0;
 
 	if (argc < 3) {
 		usage(argv[0]);
@@ -1001,18 +1008,35 @@ int main(int argc, const char *argv[])
 	r = stat_device_size(disk.fd, &disk.size);
 	if (r < 0) {
 		fprintf(stderr, "failed to get device size %s, err %d\n", argv[1], -r);
+		close(disk.fd);
 		return -1;
 	}
 	disk.super = NULL;
 	r = call_fn(&disk, argc - 2, argv + 2);
-	closefs(&disk);
-	fsync(disk.fd);
-	close(disk.fd);
+	close_r = closefs(&disk);
+	if (close_r < 0)
+		fprintf(stderr, "failed to close filesystem, err %d\n", -close_r);
+	if (fsync(disk.fd) < 0) {
+		sync_r = -errno;
+		fprintf(stderr, "failed to sync device %s, err %d\n", argv[1], -sync_r);
+	}
+	if (close(disk.fd) < 0) {
+		fd_close_r = -errno;
+		fprintf(stderr, "failed to close device %s, err %d\n", argv[1], -fd_close_r);
+	}
+
+	if (!r && close_r < 0)
+		r = close_r;
+	if (!r && sync_r < 0)
+		r = sync_r;
+	if (!r && fd_close_r < 0)
+		r = fd_close_r;
 
 #ifdef CYANFS_DEBUG_ENABLED
 	if (cyanfs_atomic_read(&debug_malloc_counter)) {
 		fprintf(stderr, "malloc counter error: %d", cyanfs_atomic_read(&debug_malloc_counter));
-		return -1;
+		if (!r)
+			r = -EIO;
 	}
 #endif
 

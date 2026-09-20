@@ -25,13 +25,16 @@
 #define CYANFS_EXTENT_SHIFT (20ULL)
 #define CYANFS_EXTENT_SIZE (1ULL << CYANFS_EXTENT_SHIFT)
 #define CYANFS_EXTENT_MASK (CYANFS_EXTENT_SIZE - 1ULL)
+#define CYANFS_EXTENT_INDEX_BITS 30
+#define CYANFS_EXTENT_COUNT_MAX (1ULL << CYANFS_EXTENT_INDEX_BITS)
+#define CYANFS_EXTENT_INDEX_MAX (CYANFS_EXTENT_COUNT_MAX - 1ULL)
+#define CYANFS_FILE_MAX_SIZE (CYANFS_EXTENT_COUNT_MAX << CYANFS_EXTENT_SHIFT)
 
 #define CYANFS_FILE_ALIGN_SIZE (1ULL << 12)
 #define CYANFS_FILE_ALIGN_MASK (CYANFS_FILE_ALIGN_SIZE - 1ULL)
 
 typedef void (*cyanfs_ctx_fn)(void *ctx);
 
-typedef uint64_t cyanfs_file_id_t; // 文件的唯一ID，全局递增
 typedef uint64_t cyanfs_journal_seq_t;
 typedef uint32_t cyanfs_extent_id;
 #define cyanfs_extent_id_invalid (~0)
@@ -39,6 +42,12 @@ typedef uint32_t cyanfs_extent_id;
 struct cyanfs_task;
 struct cyanfs_file;
 struct cyanfs_super;
+
+/* Shared with the standalone Linux UAPI header, in either include order. */
+#ifndef __CYANFS_FILE_META_TYPES_DEFINED__
+#define __CYANFS_FILE_META_TYPES_DEFINED__
+
+typedef uint64_t cyanfs_file_id_t; // 文件的唯一ID，全局递增
 
 typedef struct {
 	uint8_t data[127];
@@ -53,6 +62,9 @@ struct cyanfs_file_meta {
 	uint32_t extents;
 	uint32_t children;
 };
+
+static const struct cyanfs_file_meta cyanfs_list_init_iter = { 0 };
+#endif
 
 typedef enum {
 	CYANFS_MAP_NOP, // 无需向下层发送IO，直接标注完成
@@ -116,6 +128,9 @@ struct cyanfs_task {
 	};
 };
 
+#ifndef __CYANFS_SUPER_META_TYPES_DEFINED__
+#define __CYANFS_SUPER_META_TYPES_DEFINED__
+
 typedef struct {
 	uint32_t data[4];
 } cyanfs_uuid_t;
@@ -130,6 +145,7 @@ struct cyanfs_super_meta {
 	uint64_t size;
 	uint32_t files;
 };
+#endif
 
 struct cyanfs_super_header {
 	cyanfs_uuid_t uuid;
@@ -165,7 +181,6 @@ extern cyanfs_status cyanfs_truncate(struct cyanfs_super *s, cyanfs_file_id_t id
 extern cyanfs_status cyanfs_delete(struct cyanfs_super *s, cyanfs_file_id_t id);
 extern void cyanfs_close(struct cyanfs_file *f);
 
-static const struct cyanfs_file_meta cyanfs_list_init_iter = { 0 };
 extern cyanfs_status cyanfs_list(struct cyanfs_super *s, struct cyanfs_file_meta *iter);
 extern cyanfs_status cyanfs_lookup(struct cyanfs_super *s, cyanfs_file_name_t name, struct cyanfs_file_meta *meta);
 

@@ -23,16 +23,22 @@ cyanfs_atomic_t debug_malloc_counter = { 0 };
 struct cyanfs_extent_node *__cyanfs_super_find_nearly_extent(struct cyanfs_super *s, cyanfs_extent_id id_from)
 {
 	struct cyanfs_extent_node cmp, *n;
-	cmp.v.backend = id_from;
-	n = CYANFS_RB_NFIND(cyanfs_backend_extents_rb, &s->free_extents, &cmp);
-	if (n)
-		return n;
+
+	if (id_from <= CYANFS_EXTENT_INDEX_MAX) {
+		cmp.v.backend = id_from;
+		n = CYANFS_RB_NFIND(cyanfs_backend_extents_rb, &s->free_extents, &cmp);
+		if (n)
+			return n;
+	}
 	return CYANFS_RB_MIN(cyanfs_backend_extents_rb, &s->free_extents);
 }
 
 struct cyanfs_extent_node *__cyanfs_super_find_extent(struct cyanfs_super *s, cyanfs_extent_id id)
 {
 	struct cyanfs_extent_node cmp;
+
+	if (id > CYANFS_EXTENT_INDEX_MAX)
+		return NULL;
 	cmp.v.backend = id;
 	return CYANFS_RB_FIND(cyanfs_backend_extents_rb, &s->free_extents, &cmp);
 }
@@ -68,7 +74,7 @@ struct cyanfs_extent_node *__cyanfs_file_find_extent_follow(struct cyanfs_file *
 {
 	struct cyanfs_extent_node *n = NULL;
 
-	while (f && cyanfs_extent_end(cyanfs_extent_from(f_off)) <= cyanfs_extent_align(f->meta.size)) {
+	while (f && cyanfs_extent_begin(cyanfs_extent_from(f_off)) < f->meta.size) {
 		n = __cyanfs_file_find_extent(f, f_off);
 		if (n)
 			break;
@@ -113,6 +119,8 @@ cyanfs_status __cyanfs_file_bind_extent(struct cyanfs_file *f, cyanfs_extent_id 
 	struct cyanfs_super *s = f->super;
 	struct cyanfs_extent_node *n;
 
+	if (f_id > CYANFS_EXTENT_INDEX_MAX || cyanfs_extent_begin(f_id) >= f->meta.size)
+		return -CYANFS_ERR_INVAL;
 	n = __cyanfs_super_find_extent(s, b_id);
 	if (!n)
 		return -CYANFS_ERR_INVAL;
@@ -125,6 +133,8 @@ cyanfs_status __cyanfs_file_unbind_extent(struct cyanfs_file *f, cyanfs_extent_i
 {
 	struct cyanfs_extent_node *n;
 
+	if (f_id > CYANFS_EXTENT_INDEX_MAX || cyanfs_extent_begin(f_id) >= f->meta.size)
+		return -CYANFS_ERR_INVAL;
 	n = __cyanfs_file_find_extent(f, cyanfs_extent_begin(f_id));
 	if (!n)
 		return -CYANFS_ERR_INVAL;
@@ -231,29 +241,42 @@ void __cyanfs_super_journal_append(struct cyanfs_super *s, struct cyanfs_journal
 
 cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanfs_journal_entry *j)
 {
+	cyanfs_file_name_t name;
+	cyanfs_status err;
 	struct cyanfs_file *f, *p;
 	struct cyanfs_extent_node *n;
 
 	switch (j->type) {
 	case CYANFS_JOURNAL_CREATE:
+		name = *j->create.name;
+		err = __cyanfs_file_name_normalize(&name);
+		if (err || __cyanfs_lookup_file_by_name(s, name))
+			return -CYANFS_ERR_INVAL;
 		f = cyanfs_malloc(sizeof(struct cyanfs_file));
 		if (!f)
 			return -CYANFS_ERR_NOMEM;
-		__cyanfs_init_file(s, f, *j->create.name, j->create.id, NULL);
+		__cyanfs_init_file(s, f, name, j->create.id, NULL);
 		return 0;
 	case CYANFS_JOURNAL_TRUNCATE:
-		f = __cyanfs_lookup_file_by_id(s, j->bind.id);
+		err = __cyanfs_file_size_validate(j->truncate.size);
+		if (err)
+			return err;
+		f = __cyanfs_lookup_file_by_id(s, j->truncate.id);
 		if (!f)
 			return -CYANFS_ERR_INVAL;
 		return __cyanfs_file_truncate(f, j->truncate.size);
 	case CYANFS_JOURNAL_FORK:
+		name = *j->fork.name;
+		err = __cyanfs_file_name_normalize(&name);
+		if (err || __cyanfs_lookup_file_by_name(s, name))
+			return -CYANFS_ERR_INVAL;
 		p = __cyanfs_lookup_file_by_id(s, j->fork.pid);
 		if (!p)
 			return -CYANFS_ERR_INVAL;
 		f = cyanfs_malloc(sizeof(struct cyanfs_file));
 		if (!f)
 			return -CYANFS_ERR_NOMEM;
-		__cyanfs_init_file(s, f, *j->fork.name, j->fork.id, p);
+		__cyanfs_init_file(s, f, name, j->fork.id, p);
 		return 0;
 	case CYANFS_JOURNAL_DELETE:
 		f = __cyanfs_lookup_file_by_id(s, j->delete.id);
@@ -271,10 +294,17 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 			return -CYANFS_ERR_INVAL;
 		return __cyanfs_file_unbind_extent(f, j->unbind.file);
 	case CYANFS_JOURNAL_RENAME:
+		name = *j->rename.name;
+		err = __cyanfs_file_name_normalize(&name);
+		if (err)
+			return err;
 		f = __cyanfs_lookup_file_by_id(s, j->rename.id);
 		if (!f)
 			return -CYANFS_ERR_INVAL;
-		return __cyanfs_rename_file(f, *j->rename.name);
+		p = __cyanfs_lookup_file_by_name(s, name);
+		if (p && p != f)
+			return -CYANFS_ERR_INVAL;
+		return __cyanfs_rename_file(f, name);
 	case CYANFS_JOURNAL_NEXT:
 		n = __cyanfs_super_find_extent(s, j->next.backend);
 		if (!n)
@@ -362,7 +392,8 @@ struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact)
 	struct cyanfs_super *s;
 	struct cyanfs_task_journal_loader *t;
 
-	if (size < CYANFS_SUPER_BLOCK_SIZE + CYANFS_EXTENT_SIZE)
+	if (size < CYANFS_SUPER_BLOCK_SIZE + CYANFS_EXTENT_SIZE ||
+	    size - CYANFS_SUPER_BLOCK_SIZE > CYANFS_FILE_MAX_SIZE)
 		goto out;
 
 	s = cyanfs_malloc(sizeof(struct cyanfs_super));
@@ -408,6 +439,7 @@ struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact)
 	}
 	s->meta.free_extents = s->meta.total_extents;
 	s->meta.journal_extents = 0;
+	s->meta.data_extents = 0;
 	s->meta.size = size;
 	s->meta.files = 0;
 	s->meta.reserved_extents = ({
@@ -559,6 +591,10 @@ cyanfs_status cyanfs_lookup(struct cyanfs_super *s, cyanfs_file_name_t name, str
 	cyanfs_status err;
 	struct cyanfs_file *f;
 
+	err = __cyanfs_file_name_normalize(&name);
+	if (err)
+		return err;
+
 	cyanfs_read_lock(&s->files_lock);
 	err = __cyanfs_super_ensure_status(s);
 	if (err)
@@ -614,7 +650,10 @@ cyanfs_status cyanfs_create(struct cyanfs_super *s, cyanfs_file_name_t name, cya
 	cyanfs_status err = -CYANFS_ERR_NOMEM;
 	struct cyanfs_file *f = NULL;
 	struct cyanfs_journal_entry *j = NULL;
-	name.zero = 0;
+
+	err = __cyanfs_file_name_normalize(&name);
+	if (err)
+		return err;
 
 	f = cyanfs_malloc(sizeof(struct cyanfs_file));
 	if (!f)
@@ -665,7 +704,10 @@ cyanfs_status cyanfs_fork(struct cyanfs_super *s, cyanfs_file_id_t from, cyanfs_
 	cyanfs_status err = -CYANFS_ERR_NOMEM;
 	struct cyanfs_file *f = NULL, *p;
 	struct cyanfs_journal_entry *j = NULL;
-	name_to.zero = 0;
+
+	err = __cyanfs_file_name_normalize(&name_to);
+	if (err)
+		return err;
 
 	f = cyanfs_malloc(sizeof(struct cyanfs_file));
 	if (!f)
@@ -721,7 +763,10 @@ cyanfs_status cyanfs_rename(struct cyanfs_super *s, cyanfs_file_id_t id, cyanfs_
 	cyanfs_status err;
 	struct cyanfs_file *f;
 	struct cyanfs_journal_entry *j;
-	name.zero = 0;
+
+	err = __cyanfs_file_name_normalize(&name);
+	if (err)
+		return err;
 
 	j = cyanfs_journal_alloc(CYANFS_JOURNAL_RENAME);
 	if (!j)
@@ -759,8 +804,9 @@ cyanfs_status cyanfs_truncate(struct cyanfs_super *s, cyanfs_file_id_t id, uint6
 	struct cyanfs_file *f;
 	struct cyanfs_journal_entry *j;
 
-	if (size & CYANFS_FILE_ALIGN_MASK)
-		return -CYANFS_ERR_INVAL;
+	err = __cyanfs_file_size_validate(size);
+	if (err)
+		return err;
 
 	j = cyanfs_journal_alloc(CYANFS_JOURNAL_TRUNCATE);
 	if (!j)
