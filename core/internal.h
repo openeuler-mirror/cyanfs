@@ -53,10 +53,10 @@ static inline cyanfs_status __cyanfs_file_size_validate(uint64_t size)
 
 struct cyanfs_extent {
 	cyanfs_extent_id backend : CYANFS_EXTENT_INDEX_BITS;
-	int map : 1; // 是否对应底层磁盘已分配的extent
-	int pending : 1; // 该extent正在写入，需挂起新的IO
+	unsigned int map : 1; // 是否对应底层磁盘已分配的extent
+	unsigned int pending : 1; // 该extent正在写入，需挂起新的IO
 	cyanfs_extent_id file : CYANFS_EXTENT_INDEX_BITS;
-	int error : 1; // 该extent存在IO问题
+	unsigned int error : 1; // 该extent存在IO问题
 };
 
 struct cyanfs_extent_node {

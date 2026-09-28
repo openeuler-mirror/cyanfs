@@ -45,7 +45,7 @@ typedef UINT64 uint64_t;
 	do {                                                                                                           \
 		if (cond) {                                                                                            \
 			AsciiPrint("CYANFS_BUG_ON: %a:%d\n", __func__, __LINE__);                                      \
-			*((uint8_t *)0) = 0;                                                                           \
+			CpuDeadLoop();                                                                                 \
 		}                                                                                                      \
 	} while (0)
 
@@ -66,7 +66,12 @@ struct cyanfs_rwlock {
 	EFI_TPL tpl;
 };
 
-static inline void cyanfs_init_rwlock(struct cyanfs_rwlock *lock)
+static inline int cyanfs_init_rwlock(struct cyanfs_rwlock *lock)
+{
+	return 0;
+}
+
+static inline void cyanfs_destroy_rwlock(struct cyanfs_rwlock *lock)
 {
 }
 
@@ -94,7 +99,12 @@ struct cyanfs_lock {
 	EFI_TPL tpl;
 };
 
-static inline void cyanfs_init_lock(struct cyanfs_lock *lock)
+static inline int cyanfs_init_lock(struct cyanfs_lock *lock)
+{
+	return 0;
+}
+
+static inline void cyanfs_destroy_lock(struct cyanfs_lock *lock)
 {
 }
 

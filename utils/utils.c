@@ -64,6 +64,8 @@ int safe_pwrite(int fd, void *buf, off_t offset, size_t count)
 			if (errno == EINTR)
 				continue;
 			return -errno;
+		} else if (n == 0) {
+			return -EIO;
 		}
 		buf = ((char *)buf) + n;
 		offset += n;
@@ -82,6 +84,8 @@ int safe_write(int fd, void *buf, size_t count)
 			if (errno == EINTR)
 				continue;
 			return -errno;
+		} else if (n == 0) {
+			return -EIO;
 		}
 		buf = ((char *)buf) + n;
 		c -= n;
@@ -102,7 +106,9 @@ int stat_device_size(int fd, uint64_t *size)
 		*size = stat.st_size;
 		return 0;
 	} else if (S_ISBLK(stat.st_mode)) {
-		return ioctl(fd, BLKGETSIZE64, size);
+		if (ioctl(fd, BLKGETSIZE64, size) < 0)
+			return -errno;
+		return 0;
 	} else {
 		return -EINVAL;
 	}

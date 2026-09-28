@@ -107,11 +107,11 @@ static int do_mkfs(struct disk *disk, int argc, const char *argv[])
 		return r;
 	}
 	r = safe_read(fd, &uuid, sizeof(uuid));
+	close(fd);
 	if (r < 0) {
 		fprintf(stderr, "failed to read urandom device\n");
 		return r;
 	}
-	close(fd);
 
 	cyanfs_super_make(uuid, block);
 	r = safe_pwrite(disk->fd, block, 0, CYANFS_SUPER_BLOCK_SIZE);
@@ -292,7 +292,6 @@ static int do_extents(struct disk *disk, int argc, const char *argv[])
 }
 
 struct requeue_ctx {
-	struct disk *disk;
 	int done;
 	pthread_cond_t cond;
 	pthread_mutex_t lock;
@@ -301,10 +300,40 @@ struct requeue_ctx {
 static void requeue_done(void *c)
 {
 	struct requeue_ctx *ctx = c;
-	pthread_mutex_lock(&ctx->lock);
+	CYANFS_BUG_ON(pthread_mutex_lock(&ctx->lock));
 	ctx->done = 1;
-	pthread_cond_signal(&ctx->cond);
-	pthread_mutex_unlock(&ctx->lock);
+	CYANFS_BUG_ON(pthread_cond_signal(&ctx->cond));
+	CYANFS_BUG_ON(pthread_mutex_unlock(&ctx->lock));
+}
+
+static int wait_requeue(struct cyanfs_file *file)
+{
+	struct requeue_ctx ctx = { .done = 0 };
+	int err;
+
+	err = pthread_mutex_init(&ctx.lock, NULL);
+	if (err)
+		return -err;
+	err = pthread_cond_init(&ctx.cond, NULL);
+	if (err) {
+		err = -err;
+		goto destroy_mutex;
+	}
+	err = cyanfs_requeue(file, &ctx, requeue_done);
+	if (err)
+		goto destroy_cond;
+
+	/* Once queued, the callback owns a reference to this stack context. */
+	CYANFS_BUG_ON(pthread_mutex_lock(&ctx.lock));
+	while (!ctx.done)
+		CYANFS_BUG_ON(pthread_cond_wait(&ctx.cond, &ctx.lock));
+	CYANFS_BUG_ON(pthread_mutex_unlock(&ctx.lock));
+
+destroy_cond:
+	CYANFS_BUG_ON(pthread_cond_destroy(&ctx.cond));
+destroy_mutex:
+	CYANFS_BUG_ON(pthread_mutex_destroy(&ctx.lock));
+	return err;
 }
 
 const int io_op_read = 0;
@@ -325,7 +354,6 @@ static int do_io_partial(cyanfs_map_type_t type, uint64_t offset, uint64_t len, 
 {
 	struct ioctx *ctx = c;
 	struct disk *disk = ctx->disk;
-	struct requeue_ctx requeue = { .disk = disk, .done = 0 };
 	int err = -EIO;
 
 	switch (type) {
@@ -343,14 +371,9 @@ static int do_io_partial(cyanfs_map_type_t type, uint64_t offset, uint64_t len, 
 			CYANFS_BUG_ON(1);
 		break;
 	case CYANFS_MAP_REQUEUE:
-		pthread_cond_init(&requeue.cond, NULL);
-		pthread_mutex_init(&requeue.lock, NULL);
-		err = cyanfs_requeue(ctx->file, &requeue, requeue_done);
-		pthread_mutex_lock(&requeue.lock);
-		if (!requeue.done)
-			pthread_cond_wait(&requeue.cond, &requeue.lock);
-		pthread_mutex_unlock(&requeue.lock);
-		err = do_io(disk, ctx->file, ctx->op, ctx->offset, len, ctx->buffer);
+		err = wait_requeue(ctx->file);
+		if (!err)
+			err = do_io(disk, ctx->file, ctx->op, ctx->offset, len, ctx->buffer);
 		break;
 	default:
 		CYANFS_BUG_ON(1);
@@ -482,6 +505,11 @@ static int do_write(struct disk *disk, int argc, const char *argv[])
 	return r;
 }
 
+static int valid_file_range(uint64_t offset, uint64_t length, uint64_t size)
+{
+	return offset <= size && length <= size - offset;
+}
+
 static int __do_fill(struct disk *disk, int v, int argc, const char *argv[])
 {
 	cyanfs_file_name_t name = { 0 };
@@ -506,7 +534,7 @@ static int __do_fill(struct disk *disk, int v, int argc, const char *argv[])
 	r = cyanfs_open(disk->super, meta.id, 1, &file);
 	if (r < 0)
 		return r;
-	if (offset + length > meta.size) {
+	if (!valid_file_range(offset, length, meta.size)) {
 		r = -EINVAL;
 		goto close;
 	}
@@ -563,7 +591,7 @@ static int __do_check(struct disk *disk, int v, int argc, const char *argv[])
 	r = cyanfs_open(disk->super, meta.id, 0, &file);
 	if (r < 0)
 		return r;
-	if (offset + length > meta.size) {
+	if (!valid_file_range(offset, length, meta.size)) {
 		r = -EINVAL;
 		goto close;
 	}
@@ -621,7 +649,7 @@ static int do_discard(struct disk *disk, int argc, const char *argv[])
 	r = cyanfs_open(disk->super, meta.id, 1, &file);
 	if (r < 0)
 		return r;
-	if (offset + length > meta.size) {
+	if (!valid_file_range(offset, length, meta.size)) {
 		r = -EINVAL;
 		goto close;
 	}
@@ -904,6 +932,25 @@ static int is_space(char ch)
 	}
 }
 
+static int split_line(char *line, const char *argv[], int capacity)
+{
+	char *p = line;
+	int argc = 0;
+
+	while (is_space(*p))
+		++p;
+	while (*p) {
+		if (argc == capacity)
+			return -E2BIG;
+		argv[argc++] = p;
+		while (*p && !is_space(*p))
+			++p;
+		while (is_space(*p))
+			*(p++) = 0;
+	}
+	return argc;
+}
+
 static int do_batch(struct disk *disk, int argc, const char *argv[])
 {
 	FILE *file = stdin;
@@ -921,31 +968,24 @@ static int do_batch(struct disk *disk, int argc, const char *argv[])
 		int c = 0;
 		const char *v[1024];
 		char *line = NULL;
-		char *p;
 		size_t n;
 
+		errno = 0;
 		if (getline(&line, &n, file) <= 0) {
+			r = errno ? -errno : -EIO;
+			if (feof(file) && !ferror(file))
+				r = 0;
 			if (line)
 				free(line);
-			r = -errno;
 			break;
 		}
-		p = line;
-
-		while (*p == ' ' || is_space(*p))
-			++p;
-		if (!*p)
+		c = split_line(line, v, sizeof(v) / sizeof(v[0]));
+		if (c < 0) {
+			r = c;
 			goto skip;
-
-		do {
-			v[c++] = p;
-			while (*p && !is_space(*p))
-				++p;
-			while (is_space(*p))
-				*(p++) = 0;
-		} while (*p);
-
-		r = call_fn(disk, c, v);
+		}
+		if (c)
+			r = call_fn(disk, c, v);
 
 	skip:
 		free(line);
