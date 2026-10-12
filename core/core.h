@@ -160,6 +160,7 @@ struct cyanfs_super_header {
 extern struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact);
 extern void cyanfs_super_close(struct cyanfs_super *s);
 extern struct cyanfs_task *cyanfs_super_get_task(struct cyanfs_super *s);
+extern void cyanfs_super_task_done(struct cyanfs_task *t, cyanfs_status err);
 extern void cyanfs_super_set_new_task_callback(struct cyanfs_super *s, void *ctx, cyanfs_ctx_fn fn);
 extern int cyanfs_super_is_ready(struct cyanfs_super *s);
 extern cyanfs_status cyanfs_super_status(struct cyanfs_super *s);

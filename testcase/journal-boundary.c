@@ -55,7 +55,7 @@ static void run_loader(cyanfs_extent_id end_id)
 		assert(task->read.len <= DISK_SIZE - task->read.b_off);
 		memcpy(task->read.buf, disk + task->read.b_off, task->read.len);
 		++reads;
-		task->done(task, 0);
+		cyanfs_super_task_done(task, 0);
 	}
 	cyanfs_destroy_lock(&super.task_lock);
 }

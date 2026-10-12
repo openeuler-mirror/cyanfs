@@ -331,7 +331,7 @@ cyanfs_status cyanfs_flush(struct cyanfs_file *f, cyanfs_map_type_t *type)
 		return err;
 
 	cyanfs_lock(&s->task_lock);
-	*type = cyanfs_list_empty(&s->task_head) ? CYANFS_MAP_SUBMIT : CYANFS_MAP_REQUEUE;
+	*type = cyanfs_list_empty(&s->task_head) && !s->active_tasks ? CYANFS_MAP_SUBMIT : CYANFS_MAP_REQUEUE;
 	cyanfs_unlock(&s->task_lock);
 
 	return 0;

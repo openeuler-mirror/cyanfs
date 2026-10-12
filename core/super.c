@@ -367,10 +367,23 @@ struct cyanfs_task *cyanfs_super_get_task(struct cyanfs_super *s)
 	if (!cyanfs_list_empty(&s->task_head)) {
 		t = cyanfs_list_first_entry(&s->task_head, struct cyanfs_task, list);
 		cyanfs_list_del(&t->list);
+		++s->active_tasks;
 	}
 	cyanfs_unlock(&s->task_lock);
 
 	return t;
+}
+
+void cyanfs_super_task_done(struct cyanfs_task *t, cyanfs_status err)
+{
+	struct cyanfs_super *s = t->super;
+
+	t->done(t, err);
+
+	cyanfs_lock(&s->task_lock);
+	CYANFS_BUG_ON(!s->active_tasks);
+	--s->active_tasks;
+	cyanfs_unlock(&s->task_lock);
 }
 
 cyanfs_status cyanfs_super_flush(struct cyanfs_super *s, int ondisk)
@@ -431,6 +444,7 @@ struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact)
 	CYANFS_INIT_LIST_HEAD(&s->journal_head);
 	s->journal_count = 0;
 	CYANFS_INIT_LIST_HEAD(&s->task_head);
+	s->active_tasks = 0;
 	s->max_file_id = 0;
 	s->new_task = NULL;
 	s->ctx = NULL;
@@ -506,7 +520,7 @@ void cyanfs_super_close(struct cyanfs_super *s)
 	struct cyanfs_list_head *p, *tmp;
 
 	cyanfs_free(s->journal_cursor.page);
-	CYANFS_BUG_ON(!cyanfs_list_empty(&s->task_head));
+	CYANFS_BUG_ON(!cyanfs_list_empty(&s->task_head) || s->active_tasks);
 	cyanfs_list_for_each_safe(p, tmp, &s->journal_head)
 	{
 		struct cyanfs_journal_entry *j = cyanfs_container_of(p, struct cyanfs_journal_entry, list);

@@ -73,7 +73,7 @@ void CyanfsBackendLoop(IN CYANFS_BACKEND *Backend)
 		default:
 			CYANFS_BUG_ON(1);
 		}
-		t->done(t, Status);
+		cyanfs_super_task_done(t, Status);
 	}
 }
 

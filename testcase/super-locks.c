@@ -148,7 +148,7 @@ static void drain(struct cyanfs_super *s, int fail_read)
 			task->requeue.fn(task->requeue.ctx);
 			break;
 		}
-		task->done(task, err);
+		cyanfs_super_task_done(task, err);
 	}
 }
 

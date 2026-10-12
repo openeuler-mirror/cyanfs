@@ -204,6 +204,7 @@ struct cyanfs_super {
 
 	struct cyanfs_lock task_lock;
 	struct cyanfs_list_head task_head;
+	uint32_t active_tasks;
 	cyanfs_ctx_fn new_task;
 };
 

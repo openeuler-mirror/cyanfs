@@ -74,7 +74,7 @@ static void do_loop(struct disk *disk)
 			t->requeue.fn(t->requeue.ctx);
 			break;
 		}
-		t->done(t, err);
+		cyanfs_super_task_done(t, err);
 	}
 }
 
