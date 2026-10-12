@@ -370,6 +370,10 @@ void cyanfs_super_make(cyanfs_uuid_t uuid, void *super_block)
 {
 	uint8_t *h1 = super_block, *h2 = h1 + CYANFS_SUPER_HEADER_SIZE;
 	struct cyanfs_super_header h;
+	uint64_t i;
+
+	for (i = 0; i < CYANFS_SUPER_BLOCK_SIZE; ++i)
+		h1[i] = 0;
 	h.journal_id = 0;
 	h.journal_seq = 0;
 	h.uuid = uuid;

@@ -5,6 +5,7 @@
 #define DISK_SIZE (CYANFS_SUPER_BLOCK_SIZE + EXTENTS * CYANFS_EXTENT_SIZE)
 
 static unsigned char disk[DISK_SIZE];
+static unsigned char super_block[CYANFS_SUPER_BLOCK_SIZE];
 static int errors, finishes, parser_calls, reads;
 
 static cyanfs_status parse_entry(struct cyanfs_task_journal_loader *loader, struct cyanfs_journal_entry *journal)
@@ -63,7 +64,11 @@ int main(void)
 {
 	cyanfs_uuid_t uuid = { { 1, 2, 3, 4 } };
 
+	memset(disk, 0xa5, CYANFS_SUPER_BLOCK_SIZE);
+	memset(super_block, 0x5a, sizeof(super_block));
 	cyanfs_super_make(uuid, disk);
+	cyanfs_super_make(uuid, super_block);
+	assert(!memcmp(disk, super_block, sizeof(super_block)));
 
 	run_loader(cyanfs_extent_id_invalid);
 	assert(finishes == 1 && !errors && parser_calls == 1 && reads == 2);
