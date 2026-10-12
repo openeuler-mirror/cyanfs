@@ -259,6 +259,8 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 		if (err || !j->create.id || __cyanfs_lookup_file_by_id(s, j->create.id) ||
 		    __cyanfs_lookup_file_by_name(s, name))
 			return -CYANFS_ERR_INVAL;
+		if (s->meta.files >= CYANFS_SUPER_MAX_FILES)
+			return -CYANFS_ERR_NOSPACE;
 		f = cyanfs_malloc(sizeof(struct cyanfs_file));
 		if (!f)
 			return -CYANFS_ERR_NOMEM;
@@ -280,6 +282,8 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 		if (err || !j->fork.id || j->fork.id <= j->fork.pid ||
 		    __cyanfs_lookup_file_by_id(s, j->fork.id) || __cyanfs_lookup_file_by_name(s, name))
 			return -CYANFS_ERR_INVAL;
+		if (s->meta.files >= CYANFS_SUPER_MAX_FILES)
+			return -CYANFS_ERR_NOSPACE;
 		p = __cyanfs_lookup_file_by_id(s, j->fork.pid);
 		if (!p)
 			return -CYANFS_ERR_INVAL;

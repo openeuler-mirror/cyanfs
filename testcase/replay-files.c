@@ -78,6 +78,21 @@ static cyanfs_status replay_bind(struct cyanfs_super *s, cyanfs_file_id_t id, cy
 	return __cyanfs_super_journal_replay(s, &journal);
 }
 
+static void check_file_limit(void)
+{
+	struct cyanfs_super s = { 0 };
+	cyanfs_file_name_t create_name = make_name('l');
+	cyanfs_file_name_t fork_name = make_name('f');
+
+	CYANFS_RB_INIT(&s.files_by_id);
+	CYANFS_RB_INIT(&s.files_by_name);
+	s.meta.files = CYANFS_SUPER_MAX_FILES;
+	assert(replay_create(&s, 1, &create_name) == -CYANFS_ERR_NOSPACE);
+	assert(replay_fork(&s, 2, 1, &fork_name) == -CYANFS_ERR_NOSPACE);
+	assert(s.meta.files == CYANFS_SUPER_MAX_FILES && !s.max_file_id);
+	assert(!CYANFS_RB_ROOT(&s.files_by_id) && !CYANFS_RB_ROOT(&s.files_by_name));
+}
+
 static void cleanup(struct cyanfs_super *s)
 {
 	struct cyanfs_file *file;
@@ -99,6 +114,7 @@ int main(void)
 	cyanfs_file_name_t other_name = make_name('o');
 	int i;
 
+	check_file_limit();
 	CYANFS_RB_INIT(&s.files_by_id);
 	CYANFS_RB_INIT(&s.files_by_name);
 	CYANFS_RB_INIT(&s.free_extents);
