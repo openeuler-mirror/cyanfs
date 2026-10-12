@@ -1,0 +1,104 @@
+#include <assert.h>
+#include "core/internal.h"
+
+static cyanfs_file_name_t make_name(unsigned char value)
+{
+	cyanfs_file_name_t name = { 0 };
+
+	name.data[0] = value;
+	return name;
+}
+
+static struct cyanfs_file *find_id(struct cyanfs_super *s, cyanfs_file_id_t id)
+{
+	struct cyanfs_file file = { 0 };
+
+	file.meta.id = id;
+	return CYANFS_RB_FIND(cyanfs_files_id_rb, &s->files_by_id, &file);
+}
+
+static struct cyanfs_file *find_name(struct cyanfs_super *s, cyanfs_file_name_t name)
+{
+	struct cyanfs_file file = { 0 };
+
+	file.meta.name = name;
+	return CYANFS_RB_FIND(cyanfs_files_name_rb, &s->files_by_name, &file);
+}
+
+static cyanfs_status replay_create(struct cyanfs_super *s, cyanfs_file_id_t id, cyanfs_file_name_t *name)
+{
+	struct cyanfs_journal_entry journal = { 0 };
+
+	journal.type = CYANFS_JOURNAL_CREATE;
+	journal.create.id = id;
+	journal.create.name = name;
+	return __cyanfs_super_journal_replay(s, &journal);
+}
+
+static cyanfs_status replay_fork(struct cyanfs_super *s, cyanfs_file_id_t id, cyanfs_file_id_t parent_id,
+				 cyanfs_file_name_t *name)
+{
+	struct cyanfs_journal_entry journal = { 0 };
+
+	journal.type = CYANFS_JOURNAL_FORK;
+	journal.fork.id = id;
+	journal.fork.pid = parent_id;
+	journal.fork.name = name;
+	return __cyanfs_super_journal_replay(s, &journal);
+}
+
+static void cleanup(struct cyanfs_super *s)
+{
+	struct cyanfs_file *file;
+
+	while ((file = CYANFS_RB_MIN(cyanfs_files_id_rb, &s->files_by_id))) {
+		CYANFS_RB_REMOVE(cyanfs_files_id_rb, &s->files_by_id, file);
+		CYANFS_RB_REMOVE(cyanfs_files_name_rb, &s->files_by_name, file);
+		cyanfs_free(file);
+	}
+}
+
+int main(void)
+{
+	struct cyanfs_super s = { 0 };
+	struct cyanfs_file *parent, *child;
+	cyanfs_file_name_t parent_name = make_name('p');
+	cyanfs_file_name_t child_name = make_name('c');
+	cyanfs_file_name_t other_name = make_name('o');
+
+	CYANFS_RB_INIT(&s.files_by_id);
+	CYANFS_RB_INIT(&s.files_by_name);
+
+	assert(replay_create(&s, 0, &parent_name) == -CYANFS_ERR_INVAL);
+	assert(!s.meta.files && !s.max_file_id);
+
+	assert(!replay_create(&s, 10, &parent_name));
+	parent = find_id(&s, 10);
+	assert(parent && find_name(&s, parent_name) == parent);
+	assert(s.meta.files == 1 && s.max_file_id == 10 && !parent->meta.children);
+
+	assert(replay_create(&s, 10, &other_name) == -CYANFS_ERR_INVAL);
+	assert(s.meta.files == 1 && s.max_file_id == 10);
+	assert(find_id(&s, 10) == parent && !find_name(&s, other_name));
+
+	assert(replay_fork(&s, 0, 10, &child_name) == -CYANFS_ERR_INVAL);
+	assert(replay_fork(&s, 9, 10, &child_name) == -CYANFS_ERR_INVAL);
+	assert(replay_fork(&s, 11, 9, &child_name) == -CYANFS_ERR_INVAL);
+	assert(s.meta.files == 1 && s.max_file_id == 10 && !parent->meta.children);
+	assert(!find_name(&s, child_name));
+
+	assert(!replay_fork(&s, 11, 10, &child_name));
+	child = find_id(&s, 11);
+	assert(child && find_name(&s, child_name) == child);
+	assert(child->parent == parent && child->meta.parent_id == 10);
+	assert(s.meta.files == 2 && s.max_file_id == 11 && parent->meta.children == 1);
+
+	assert(replay_fork(&s, 11, 10, &other_name) == -CYANFS_ERR_INVAL);
+	assert(replay_fork(&s, 12, 10, &child_name) == -CYANFS_ERR_INVAL);
+	assert(s.meta.files == 2 && s.max_file_id == 11 && parent->meta.children == 1);
+	assert(find_id(&s, 11) == child && !find_id(&s, 12));
+	assert(!find_name(&s, other_name));
+
+	cleanup(&s);
+	return 0;
+}

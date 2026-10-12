@@ -184,8 +184,8 @@ static struct cyanfs_file *__cyanfs_lookup_file_by_id(struct cyanfs_super *s, cy
 	return CYANFS_RB_FIND(cyanfs_files_id_rb, &s->files_by_id, &tmp);
 }
 
-static void __cyanfs_init_file(struct cyanfs_super *s, struct cyanfs_file *file, cyanfs_file_name_t name,
-			       cyanfs_file_id_t id, struct cyanfs_file *parent)
+static cyanfs_status __cyanfs_init_file(struct cyanfs_super *s, struct cyanfs_file *file, cyanfs_file_name_t name,
+				      cyanfs_file_id_t id, struct cyanfs_file *parent)
 {
 	file->meta.name = name;
 	file->meta.id = id;
@@ -198,15 +198,18 @@ static void __cyanfs_init_file(struct cyanfs_super *s, struct cyanfs_file *file,
 	file->open_type = CYANFS_FILE_CLOSED;
 	file->reader = 0;
 	CYANFS_RB_INIT(&file->extents);
+	if (CYANFS_RB_INSERT(cyanfs_files_id_rb, &s->files_by_id, file))
+		return -CYANFS_ERR_INVAL;
+	if (CYANFS_RB_INSERT(cyanfs_files_name_rb, &s->files_by_name, file)) {
+		CYANFS_RB_REMOVE(cyanfs_files_id_rb, &s->files_by_id, file);
+		return -CYANFS_ERR_INVAL;
+	}
 	if (parent)
 		++parent->meta.children;
-	if (!file->meta.id)
-		file->meta.id = ++s->max_file_id;
-	else if (file->meta.id > s->max_file_id)
+	if (file->meta.id > s->max_file_id)
 		s->max_file_id = file->meta.id;
-	CYANFS_RB_INSERT(cyanfs_files_id_rb, &s->files_by_id, file);
-	CYANFS_RB_INSERT(cyanfs_files_name_rb, &s->files_by_name, file);
 	++s->meta.files;
+	return 0;
 }
 
 static cyanfs_status __cyanfs_rename_file(struct cyanfs_file *f, cyanfs_file_name_t name)
@@ -250,13 +253,16 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 	case CYANFS_JOURNAL_CREATE:
 		name = *j->create.name;
 		err = __cyanfs_file_name_normalize(&name);
-		if (err || __cyanfs_lookup_file_by_name(s, name))
+		if (err || !j->create.id || __cyanfs_lookup_file_by_id(s, j->create.id) ||
+		    __cyanfs_lookup_file_by_name(s, name))
 			return -CYANFS_ERR_INVAL;
 		f = cyanfs_malloc(sizeof(struct cyanfs_file));
 		if (!f)
 			return -CYANFS_ERR_NOMEM;
-		__cyanfs_init_file(s, f, name, j->create.id, NULL);
-		return 0;
+		err = __cyanfs_init_file(s, f, name, j->create.id, NULL);
+		if (err)
+			cyanfs_free(f);
+		return err;
 	case CYANFS_JOURNAL_TRUNCATE:
 		err = __cyanfs_file_size_validate(j->truncate.size);
 		if (err)
@@ -268,7 +274,8 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 	case CYANFS_JOURNAL_FORK:
 		name = *j->fork.name;
 		err = __cyanfs_file_name_normalize(&name);
-		if (err || __cyanfs_lookup_file_by_name(s, name))
+		if (err || !j->fork.id || j->fork.id <= j->fork.pid ||
+		    __cyanfs_lookup_file_by_id(s, j->fork.id) || __cyanfs_lookup_file_by_name(s, name))
 			return -CYANFS_ERR_INVAL;
 		p = __cyanfs_lookup_file_by_id(s, j->fork.pid);
 		if (!p)
@@ -276,8 +283,10 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 		f = cyanfs_malloc(sizeof(struct cyanfs_file));
 		if (!f)
 			return -CYANFS_ERR_NOMEM;
-		__cyanfs_init_file(s, f, name, j->fork.id, p);
-		return 0;
+		err = __cyanfs_init_file(s, f, name, j->fork.id, p);
+		if (err)
+			cyanfs_free(f);
+		return err;
 	case CYANFS_JOURNAL_DELETE:
 		f = __cyanfs_lookup_file_by_id(s, j->delete.id);
 		if (!f)
@@ -684,7 +693,9 @@ cyanfs_status cyanfs_create(struct cyanfs_super *s, cyanfs_file_name_t name, cya
 	if (__cyanfs_lookup_file_by_name(s, name)) {
 		err = -CYANFS_ERR_EXIST;
 	} else {
-		__cyanfs_init_file(s, f, name, 0, NULL);
+		err = __cyanfs_init_file(s, f, name, s->max_file_id + 1, NULL);
+		if (err)
+			goto unlock;
 		*j->create.name = name;
 		j->create.id = f->meta.id;
 		__cyanfs_super_journal_append(s, j);
@@ -744,7 +755,9 @@ cyanfs_status cyanfs_fork(struct cyanfs_super *s, cyanfs_file_id_t from, cyanfs_
 	} else if (__cyanfs_lookup_file_by_name(s, name_to)) {
 		err = -CYANFS_ERR_EXIST;
 	} else {
-		__cyanfs_init_file(s, f, name_to, 0, p);
+		err = __cyanfs_init_file(s, f, name_to, s->max_file_id + 1, p);
+		if (err)
+			goto unlock;
 		*j->fork.name = name_to;
 		j->fork.id = f->meta.id;
 		j->fork.pid = p->meta.id;
