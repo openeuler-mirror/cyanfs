@@ -268,7 +268,7 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 		if (err)
 			return err;
 		f = __cyanfs_lookup_file_by_id(s, j->truncate.id);
-		if (!f)
+		if (!f || f->meta.children)
 			return -CYANFS_ERR_INVAL;
 		return __cyanfs_file_truncate(f, j->truncate.size);
 	case CYANFS_JOURNAL_FORK:
@@ -289,7 +289,7 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 		return err;
 	case CYANFS_JOURNAL_DELETE:
 		f = __cyanfs_lookup_file_by_id(s, j->delete.id);
-		if (!f)
+		if (!f || f->meta.children)
 			return -CYANFS_ERR_INVAL;
 		return __cyanfs_delete_file(s, f);
 	case CYANFS_JOURNAL_BIND:

@@ -47,6 +47,25 @@ static cyanfs_status replay_fork(struct cyanfs_super *s, cyanfs_file_id_t id, cy
 	return __cyanfs_super_journal_replay(s, &journal);
 }
 
+static cyanfs_status replay_truncate(struct cyanfs_super *s, cyanfs_file_id_t id, uint64_t size)
+{
+	struct cyanfs_journal_entry journal = { 0 };
+
+	journal.type = CYANFS_JOURNAL_TRUNCATE;
+	journal.truncate.id = id;
+	journal.truncate.size = size;
+	return __cyanfs_super_journal_replay(s, &journal);
+}
+
+static cyanfs_status replay_delete(struct cyanfs_super *s, cyanfs_file_id_t id)
+{
+	struct cyanfs_journal_entry journal = { 0 };
+
+	journal.type = CYANFS_JOURNAL_DELETE;
+	journal.delete.id = id;
+	return __cyanfs_super_journal_replay(s, &journal);
+}
+
 static void cleanup(struct cyanfs_super *s)
 {
 	struct cyanfs_file *file;
@@ -98,6 +117,19 @@ int main(void)
 	assert(s.meta.files == 2 && s.max_file_id == 11 && parent->meta.children == 1);
 	assert(find_id(&s, 11) == child && !find_id(&s, 12));
 	assert(!find_name(&s, other_name));
+
+	assert(replay_truncate(&s, 10, CYANFS_FILE_ALIGN_SIZE) == -CYANFS_ERR_INVAL);
+	assert(replay_delete(&s, 10) == -CYANFS_ERR_INVAL);
+	assert(s.meta.files == 2 && !parent->meta.size && parent->meta.children == 1);
+	assert(child->parent == parent && find_id(&s, 10) == parent && find_id(&s, 11) == child);
+
+	assert(!replay_delete(&s, 11));
+	assert(s.meta.files == 1 && !parent->meta.children && !find_id(&s, 11));
+	assert(!find_name(&s, child_name));
+	assert(!replay_truncate(&s, 10, CYANFS_FILE_ALIGN_SIZE));
+	assert(parent->meta.size == CYANFS_FILE_ALIGN_SIZE);
+	assert(!replay_delete(&s, 10));
+	assert(!s.meta.files && !find_id(&s, 10) && !find_name(&s, parent_name));
 
 	cleanup(&s);
 	return 0;
