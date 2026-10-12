@@ -140,6 +140,9 @@ cyanfs_status cyanfs_write(struct cyanfs_file *f, void *ctx, uint64_t f_off, uin
 		cyanfs_write_lock(&s->files_lock);
 		unlocker = cyanfs_write_unlock;
 
+		err = __cyanfs_super_ensure_status(s);
+		if (err)
+			goto unlock_out;
 		n = __cyanfs_file_find_extent(f, f_off);
 		if (n) // 竞争条件，另一个write操作已经分配了此区域
 			goto mapped;
