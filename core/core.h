@@ -87,6 +87,7 @@ extern cyanfs_status cyanfs_flush(struct cyanfs_file *f, cyanfs_map_type_t *type
 extern cyanfs_status cyanfs_requeue(struct cyanfs_file *f, void *ctx, cyanfs_ctx_fn fn);
 extern uint64_t cyanfs_size(struct cyanfs_file *f);
 extern cyanfs_status cyanfs_seek_extent(struct cyanfs_file *f, uint64_t *f_off);
+extern cyanfs_status cyanfs_seek_data(struct cyanfs_file *f, uint64_t *f_off);
 
 typedef enum {
 	CYANFS_TASK_NOP,
@@ -156,16 +157,32 @@ struct cyanfs_super_header {
 	cyanfs_journal_seq_t journal_seq;
 };
 
+/*
+ * 每个 super 只能由一个串行 executor 消费 task。每次 get_task() 返回非空后，
+ * executor 必须且只能调用一次 cyanfs_super_task_done()，不能直接调用 task->done。
+ * new-task callback 只能在 executor 静止时注册或清除；清除前须先停止并等待
+ * executor，且 callback 的 ctx 必须存活到该时刻。
+ *
+ * cyanfs_close() 前须等待该文件的映射 handler 和 requeue callback 全部结束。
+ * cyanfs_super_close() 前须关闭全部文件、停止 executor 并确保 callback 不再进入、
+ * 排空并完成全部 task，且不得再有线程调用此 super 的任何接口。
+ */
 extern struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact);
 extern void cyanfs_super_close(struct cyanfs_super *s);
 extern struct cyanfs_task *cyanfs_super_get_task(struct cyanfs_super *s);
+extern void cyanfs_super_task_done(struct cyanfs_task *t, cyanfs_status err);
 extern void cyanfs_super_set_new_task_callback(struct cyanfs_super *s, void *ctx, cyanfs_ctx_fn fn);
 extern int cyanfs_super_is_ready(struct cyanfs_super *s);
 extern cyanfs_status cyanfs_super_status(struct cyanfs_super *s);
 extern cyanfs_status cyanfs_file_status(struct cyanfs_file *f);
 
 extern cyanfs_status cyanfs_super_flush(struct cyanfs_super *s, int ondisk);
-extern void cyanfs_super_compact(struct cyanfs_super *s);
+/*
+ * 启动一代 compact。未就绪或已有 compact 时返回 BUSY，已有错误时返回 IO。
+ * 返回 0 后，调用方须等待本次加入的 task 完成，再用 cyanfs_super_status()
+ * 获取异步结果。compact 未启用时保持兼容，直接返回 0。
+ */
+extern cyanfs_status cyanfs_super_compact(struct cyanfs_super *s);
 
 extern cyanfs_status cyanfs_super_parse(struct cyanfs_super_header *h, void *super_block);
 extern void cyanfs_super_make(cyanfs_uuid_t uuid, void *super_block);

@@ -62,6 +62,9 @@ typedef UINT64 uint64_t;
 #define cyanfs_le32toh(a) (a)
 #define cyanfs_le16toh(a) (a)
 
+/* core 持锁路径会调用内存服务，其允许的最高级别是 TPL_NOTIFY。 */
+#define CYANFS_LOCK_TPL TPL_NOTIFY
+
 struct cyanfs_rwlock {
 	EFI_TPL tpl;
 };
@@ -77,7 +80,7 @@ static inline void cyanfs_destroy_rwlock(struct cyanfs_rwlock *lock)
 
 static inline void cyanfs_read_lock(struct cyanfs_rwlock *lock)
 {
-	lock->tpl = gBS->RaiseTPL(TPL_HIGH_LEVEL - 1);
+	lock->tpl = gBS->RaiseTPL(CYANFS_LOCK_TPL);
 }
 
 static inline void cyanfs_read_unlock(struct cyanfs_rwlock *lock)
@@ -87,7 +90,7 @@ static inline void cyanfs_read_unlock(struct cyanfs_rwlock *lock)
 
 static inline void cyanfs_write_lock(struct cyanfs_rwlock *lock)
 {
-	lock->tpl = gBS->RaiseTPL(TPL_HIGH_LEVEL - 1);
+	lock->tpl = gBS->RaiseTPL(CYANFS_LOCK_TPL);
 }
 
 static inline void cyanfs_write_unlock(struct cyanfs_rwlock *lock)
@@ -110,7 +113,7 @@ static inline void cyanfs_destroy_lock(struct cyanfs_lock *lock)
 
 static inline void cyanfs_lock(struct cyanfs_lock *lock)
 {
-	lock->tpl = gBS->RaiseTPL(TPL_HIGH_LEVEL - 1);
+	lock->tpl = gBS->RaiseTPL(CYANFS_LOCK_TPL);
 }
 
 static inline void cyanfs_unlock(struct cyanfs_lock *lock)

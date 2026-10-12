@@ -43,26 +43,27 @@
 
 #define CYANFS_RB_LEFT(elm, field) (elm)->field.rbe_left
 #define CYANFS_RB_RIGHT(elm, field) (elm)->field.rbe_right
-#define CYANFS_RB_PARENT_GET(elm, field) ((typeof(elm))((uint64_t)((elm)->field.rbe_parent) & ~1ULL))
+#define CYANFS_RB_PARENT_GET(elm, field)                                                                                 \
+	((typeof(elm))((cyanfs_uintptr_t)((elm)->field.rbe_parent) & ~(cyanfs_uintptr_t)1))
 #define CYANFS_RB_PARENT_SET(elm, field, parent)                                                                       \
 	do {                                                                                                           \
-		uint64_t c = CYANFS_RB_COLOR_GET(elm, field);                                                          \
-		(elm)->field.rbe_parent = (typeof(elm))((uint64_t)(parent) | c);                                       \
+		cyanfs_uintptr_t c = CYANFS_RB_COLOR_GET(elm, field);                                                    \
+		(elm)->field.rbe_parent = (typeof(elm))((cyanfs_uintptr_t)(parent) | c);                                 \
 	} while (0)
-#define CYANFS_RB_COLOR_GET(elm, field) (((uint64_t)(elm)->field.rbe_parent) & 1)
+#define CYANFS_RB_COLOR_GET(elm, field) (((cyanfs_uintptr_t)(elm)->field.rbe_parent) & 1)
 #define CYANFS_RB_COLOR_SET(elm, field, color)                                                                         \
 	do {                                                                                                           \
-		uint64_t p = (uint64_t)CYANFS_RB_PARENT_GET(elm, field);                                               \
-		(elm)->field.rbe_parent = (typeof(elm))(p | (uint64_t)(color));                                        \
+		cyanfs_uintptr_t p = (cyanfs_uintptr_t)CYANFS_RB_PARENT_GET(elm, field);                                 \
+		(elm)->field.rbe_parent = (typeof(elm))(p | (cyanfs_uintptr_t)(color));                                  \
 	} while (0)
 #define CYANFS_RB_ROOT(head) (head)->rbh_root
 #define CYANFS_RB_EMPTY(head) (CYANFS_RB_ROOT(head) == NULL)
 
 #define CYANFS_RB_SET(elm, parent, field)                                                                              \
 	do {                                                                                                           \
-		CYANFS_RB_PARENT_SET(elm, field, parent);                                                              \
+		(elm)->field.rbe_parent =                                                                              \
+			(typeof(elm))((cyanfs_uintptr_t)(parent) | CYANFS_RB_RED);                                       \
 		CYANFS_RB_LEFT(elm, field) = CYANFS_RB_RIGHT(elm, field) = NULL;                                       \
-		CYANFS_RB_COLOR_SET(elm, field, CYANFS_RB_RED);                                                        \
 	} while (0)
 
 #define CYANFS_RB_SET_BLACKRED(black, red, field)                                                                      \

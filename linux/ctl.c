@@ -308,7 +308,7 @@ static loff_t cyanfs_ctl_llseek(struct file *file, loff_t offset, int whence)
 		return fixed_size_llseek(file, offset, whence, cyanfs_size(ctx->file));
 	if (offset < 0)
 		return -EINVAL;
-	r = cyanfs_seek_extent(ctx->file, &off);
+	r = cyanfs_seek_data(ctx->file, &off);
 	if (r < 0) {
 		if (r == -CYANFS_ERR_NOENT)
 			return -ENXIO;

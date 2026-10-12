@@ -290,7 +290,7 @@ static void cyanfs_backend_loop(struct cyanfs_backend *backend)
 		default:
 			BUG_ON(1);
 		}
-		t->done(t, err);
+		cyanfs_super_task_done(t, err);
 	}
 }
 

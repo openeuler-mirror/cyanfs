@@ -11,6 +11,7 @@ static int live, allocation_count, fail_allocation, fail_rwlock, fail_mutex;
 static int rwlocks, mutexes, rw_attempts, mutex_attempts, destroys;
 static pthread_rwlock_t *rwlock;
 static pthread_mutex_t *mutex;
+static struct cyanfs_super *error_on_allocation;
 
 void *__real_malloc(size_t);
 void __real_free(void *);
@@ -33,6 +34,12 @@ void *__wrap_malloc(size_t size)
 	assert(i < 128);
 	allocations[i] = p;
 	++live;
+	if (error_on_allocation) {
+		struct cyanfs_super *s = error_on_allocation;
+
+		error_on_allocation = NULL;
+		cyanfs_super_mark_error(s);
+	}
 	return p;
 }
 
@@ -94,6 +101,7 @@ int __wrap_pthread_rwlock_destroy(pthread_rwlock_t *lock)
 static void reset(void)
 {
 	assert(!live && !rwlocks && !mutexes);
+	assert(!error_on_allocation);
 	allocation_count = fail_allocation = fail_rwlock = fail_mutex = 0;
 	rw_attempts = mutex_attempts = destroys = 0;
 }
@@ -105,7 +113,11 @@ static void drain(struct cyanfs_super *s, int fail_read)
 	while ((task = cyanfs_super_get_task(s))) {
 		int err = 0;
 		assert(++count < 100);
-		if (task->type == CYANFS_TASK_READ) {
+		switch (task->type) {
+		case CYANFS_TASK_NOP:
+		case CYANFS_TASK_FLUSH:
+			break;
+		case CYANFS_TASK_READ:
 			if (fail_read) {
 				err = -EIO;
 				fail_read = 0;
@@ -114,11 +126,145 @@ static void drain(struct cyanfs_super *s, int fail_read)
 				assert(task->read.len <= DISK_SIZE - task->read.b_off);
 				memcpy(task->read.buf, disk + task->read.b_off, task->read.len);
 			}
-		} else {
-			assert(task->type == CYANFS_TASK_NOP);
+			break;
+		case CYANFS_TASK_WRITE:
+			assert(task->write.b_off <= DISK_SIZE);
+			assert(task->write.len <= DISK_SIZE - task->write.b_off);
+			memcpy(disk + task->write.b_off, task->write.buf, task->write.len);
+			break;
+		case CYANFS_TASK_COPY:
+			assert(task->copy.b_src_off <= DISK_SIZE);
+			assert(task->copy.len <= DISK_SIZE - task->copy.b_src_off);
+			assert(task->copy.b_dst_off <= DISK_SIZE);
+			assert(task->copy.len <= DISK_SIZE - task->copy.b_dst_off);
+			memmove(disk + task->copy.b_dst_off, disk + task->copy.b_src_off, task->copy.len);
+			break;
+		case CYANFS_TASK_DISCARD:
+			assert(task->discard.b_off <= DISK_SIZE);
+			assert(task->discard.len <= DISK_SIZE - task->discard.b_off);
+			memset(disk + task->discard.b_off, 0, task->discard.len);
+			break;
+		case CYANFS_TASK_REQUEUE:
+			task->requeue.fn(task->requeue.ctx);
+			break;
 		}
-		task->done(task, err);
+		cyanfs_super_task_done(task, err);
 	}
+}
+
+static cyanfs_file_name_t make_name(unsigned char value)
+{
+	cyanfs_file_name_t name = { 0 };
+
+	name.data[0] = value;
+	return name;
+}
+
+static cyanfs_status count_mapping(cyanfs_map_type_t type, uint64_t b_off, uint64_t len, void *ctx)
+{
+	int *calls = ctx;
+
+	(void)b_off;
+	(void)len;
+	assert(type == CYANFS_MAP_SUBMIT);
+	++*calls;
+	return 0;
+}
+
+static cyanfs_status count_requeue(cyanfs_map_type_t type, uint64_t b_off, uint64_t len, void *ctx)
+{
+	int *calls = ctx;
+
+	(void)b_off;
+	(void)len;
+	assert(type == CYANFS_MAP_REQUEUE);
+	++*calls;
+	return 0;
+}
+
+static void check_write_error_after_relock(struct cyanfs_super *s, cyanfs_file_id_t parent)
+{
+	struct cyanfs_file *parent_file, *child_file;
+	struct cyanfs_extent_node *source;
+	cyanfs_file_id_t child;
+	uint32_t data_extents, free_extents;
+	int calls = 0, live_before;
+
+	assert(!cyanfs_truncate(s, parent, CYANFS_FILE_ALIGN_SIZE));
+	drain(s, 0);
+	assert(!cyanfs_open(s, parent, 1, &parent_file));
+	assert(!cyanfs_write(parent_file, &calls, 0, CYANFS_FILE_ALIGN_SIZE, count_mapping));
+	assert(calls == 1);
+	cyanfs_close(parent_file);
+	drain(s, 0);
+	source = __cyanfs_file_find_extent(parent_file, 0);
+	assert(source);
+
+	assert(!cyanfs_fork(s, parent, make_name('w'), &child));
+	drain(s, 0);
+	assert(!cyanfs_open(s, child, 1, &child_file));
+	assert(child_file->meta.extents == 0);
+	data_extents = s->meta.data_extents;
+	free_extents = s->meta.free_extents;
+	live_before = live;
+
+	source->v.error = 1;
+	calls = 0;
+	assert(cyanfs_write(child_file, &calls, 0, CYANFS_FILE_ALIGN_SIZE, count_mapping) == -CYANFS_ERR_IO);
+	assert(!calls && live == live_before);
+	assert(child_file->meta.extents == 0 && !cyanfs_super_get_task(s));
+	source->v.error = 0;
+
+	source->v.pending = 1;
+	calls = 0;
+	assert(!cyanfs_write(child_file, &calls, 0, CYANFS_FILE_ALIGN_SIZE, count_requeue));
+	assert(calls == 1 && live == live_before);
+	assert(child_file->meta.extents == 0 && !cyanfs_super_get_task(s));
+	source->v.pending = 0;
+
+	calls = 0;
+	error_on_allocation = s;
+	assert(cyanfs_write(child_file, &calls, 0, CYANFS_FILE_ALIGN_SIZE, count_mapping) == -CYANFS_ERR_IO);
+	assert(!error_on_allocation);
+	assert(!calls && live == live_before);
+	assert(child_file->meta.extents == 0);
+	assert(s->meta.data_extents == data_extents && s->meta.free_extents == free_extents);
+	cyanfs_close(child_file);
+}
+
+static void check_file_allocations(struct cyanfs_super *s)
+{
+	struct cyanfs_super_meta meta;
+	cyanfs_file_id_t id, parent;
+	int i, live_before;
+
+	for (i = 1; i <= 2; ++i) {
+		id = (cyanfs_file_id_t)-1;
+		live_before = live;
+		fail_allocation = allocation_count + i;
+		assert(cyanfs_create(s, make_name('c'), &id) == -CYANFS_ERR_NOMEM);
+		fail_allocation = 0;
+		assert(id == (cyanfs_file_id_t)-1);
+		assert(live == live_before);
+		assert(!cyanfs_statfs(s, &meta) && meta.files == 0);
+	}
+
+	assert(!cyanfs_create(s, make_name('p'), &parent));
+	drain(s, 0);
+	assert(!cyanfs_statfs(s, &meta) && meta.files == 1);
+
+	for (i = 1; i <= 2; ++i) {
+		id = (cyanfs_file_id_t)-1;
+		live_before = live;
+		fail_allocation = allocation_count + i;
+		assert(cyanfs_fork(s, parent, make_name('f'), &id) == -CYANFS_ERR_NOMEM);
+		fail_allocation = 0;
+		assert(id == (cyanfs_file_id_t)-1);
+		assert(live == live_before);
+		assert(!cyanfs_statfs(s, &meta) && meta.files == 1);
+	}
+
+	check_write_error_after_relock(s, parent);
 }
 
 int main(void)
@@ -139,9 +285,11 @@ int main(void)
 	reset();
 	s = cyanfs_super_open(DISK_SIZE, 0, 0);
 	assert(s && rwlocks == 1 && mutexes == 1);
+	assert(!cyanfs_super_is_ready(s) && cyanfs_super_status(s) == -CYANFS_ERR_BUSY);
 	total_allocations = allocation_count;
 	drain(s, 0);
 	assert(cyanfs_super_is_ready(s) && !cyanfs_super_status(s));
+	check_file_allocations(s);
 	cyanfs_super_close(s);
 	assert(destroys == 2);
 	reset();
@@ -157,7 +305,13 @@ int main(void)
 		s = cyanfs_super_open(DISK_SIZE, 0, 0);
 		assert(s && rwlocks == 1 && mutexes == 1);
 		drain(s, i & 1);
-		assert((i & 1) ? cyanfs_super_status(s) != 0 : cyanfs_super_is_ready(s));
+		if (i & 1) {
+			assert(!cyanfs_super_is_ready(s));
+			assert(cyanfs_super_status(s) == -CYANFS_ERR_IO);
+		} else {
+			assert(cyanfs_super_is_ready(s));
+			assert(!cyanfs_super_status(s));
+		}
 		cyanfs_super_close(s);
 		assert(destroys == 2);
 		reset();

@@ -163,6 +163,13 @@ static inline uint64_t cyanfs_map_extent_offset(cyanfs_extent_id b_id, uint64_t 
 	return CYANFS_SUPER_BLOCK_SIZE + cyanfs_extent_begin(b_id) + (f_off & CYANFS_EXTENT_MASK);
 }
 
+static inline uint32_t cyanfs_extent_alloc_hash(cyanfs_file_id_t file_id, uint64_t f_off)
+{
+	uint64_t input[2] = { cyanfs_htole64(file_id), cyanfs_htole64(f_off) };
+
+	return cyanfs_crc32(~0, (uint8_t *)input, sizeof(input));
+}
+
 static inline cyanfs_extent_id cyanfs_map_extent_from(uint64_t b_off)
 {
 	return cyanfs_extent_from(b_off - CYANFS_SUPER_BLOCK_SIZE);
@@ -204,15 +211,16 @@ struct cyanfs_super {
 
 	struct cyanfs_lock task_lock;
 	struct cyanfs_list_head task_head;
+	uint32_t active_tasks;
 	cyanfs_ctx_fn new_task;
 };
 
 static inline cyanfs_status __cyanfs_super_ensure_status(struct cyanfs_super *s)
 {
-	if (!(s->flags & CYANFS_SUPER_FLAG_READY))
-		return -CYANFS_ERR_BUSY;
 	if (s->flags & CYANFS_SUPER_FLAG_ERROR)
 		return -CYANFS_ERR_IO;
+	if (!(s->flags & CYANFS_SUPER_FLAG_READY))
+		return -CYANFS_ERR_BUSY;
 	return 0;
 }
 
@@ -238,8 +246,15 @@ static inline void cyanfs_task_init(struct cyanfs_super *s, struct cyanfs_task *
 
 static inline void cyanfs_super_new_task(struct cyanfs_super *s)
 {
-	if (s->new_task)
-		s->new_task(s->ctx);
+	cyanfs_ctx_fn fn;
+	void *ctx;
+
+	cyanfs_lock(&s->task_lock);
+	fn = s->new_task;
+	ctx = s->ctx;
+	cyanfs_unlock(&s->task_lock);
+	if (fn)
+		fn(ctx);
 }
 
 static inline int cyanfs_super_task_add_head(struct cyanfs_task *task)
@@ -311,14 +326,14 @@ static inline void __cyanfs_extent_super_to_file(struct cyanfs_super *s, struct 
 {
 	__cyanfs_super_stat_add(s, from, -1);
 	CYANFS_RB_REMOVE(cyanfs_backend_extents_rb, from, n);
-	CYANFS_RB_INSERT(cyanfs_file_extents_rb, to, n);
+	CYANFS_BUG_ON(CYANFS_RB_INSERT(cyanfs_file_extents_rb, to, n));
 	++s->meta.data_extents;
 	++f->meta.extents;
 }
 
 struct cyanfs_extent_node *__cyanfs_super_find_nearly_extent(struct cyanfs_super *s, cyanfs_extent_id id_from);
 struct cyanfs_extent_node *__cyanfs_super_find_extent(struct cyanfs_super *s, cyanfs_extent_id id);
-void __cyanfs_file_map_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n, cyanfs_extent_id f_id);
+cyanfs_status __cyanfs_file_map_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n, cyanfs_extent_id f_id);
 void __cyanfs_file_unmap_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n);
 struct cyanfs_extent_node *__cyanfs_file_find_extent(struct cyanfs_file *f, uint64_t f_off);
 struct cyanfs_extent_node *__cyanfs_file_find_extent_follow(struct cyanfs_file *f, uint64_t f_off);
