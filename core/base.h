@@ -28,6 +28,8 @@
 #error 不支持的平台
 #endif
 
+typedef __UINTPTR_TYPE__ cyanfs_uintptr_t;
+
 #ifndef CYANFS_BUILD_BUG_ON
 #define CYANFS_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2 * !!(condition)]))
 #endif

@@ -16,8 +16,8 @@
 #ifndef __CYANFS_LIST_HEADER__
 #define __CYANFS_LIST_HEADER__
 
-#define cyanfs_offsetof(type, member) ((unsigned long long)(&(((type *)0)->member)))
-#define cyanfs_container_of(ptr, type, member) ((type *)((unsigned long long)(ptr)-cyanfs_offsetof(type, member)))
+#define cyanfs_offsetof(type, member) __builtin_offsetof(type, member)
+#define cyanfs_container_of(ptr, type, member) ((type *)((char *)(ptr)-cyanfs_offsetof(type, member)))
 
 struct cyanfs_list_head {
 	struct cyanfs_list_head *next, *prev;

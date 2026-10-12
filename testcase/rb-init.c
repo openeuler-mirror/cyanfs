@@ -25,7 +25,7 @@ static unsigned int color_read_count;
 static uint64_t test_color_get(struct test_node *node)
 {
 	++color_read_count;
-	return ((uint64_t)node->entry.rbe_parent) & 1;
+	return ((cyanfs_uintptr_t)node->entry.rbe_parent) & 1;
 }
 
 #undef CYANFS_RB_COLOR_GET

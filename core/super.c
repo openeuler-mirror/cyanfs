@@ -103,10 +103,7 @@ struct cyanfs_extent_node *__cyanfs_file_alloc_extent(struct cyanfs_file *f, uin
 	if (n && n->v.file <= id + CYANFS_EXTENT_CONTINUOUS) {
 		id_from = n->v.backend + id - n->v.file;
 	} else {
-		uint8_t hash[16];
-		*(uint64_t *)hash = f->meta.id;
-		*(uint64_t *)(hash + sizeof(uint64_t)) = f_off;
-		id_from = cyanfs_crc32(~0, hash, 16) % s->meta.total_extents;
+		id_from = cyanfs_extent_alloc_hash(f->meta.id, f_off) % s->meta.total_extents;
 	}
 
 	n = __cyanfs_super_find_nearly_extent(s, id_from);

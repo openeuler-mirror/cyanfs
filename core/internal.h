@@ -163,6 +163,13 @@ static inline uint64_t cyanfs_map_extent_offset(cyanfs_extent_id b_id, uint64_t 
 	return CYANFS_SUPER_BLOCK_SIZE + cyanfs_extent_begin(b_id) + (f_off & CYANFS_EXTENT_MASK);
 }
 
+static inline uint32_t cyanfs_extent_alloc_hash(cyanfs_file_id_t file_id, uint64_t f_off)
+{
+	uint64_t input[2] = { cyanfs_htole64(file_id), cyanfs_htole64(f_off) };
+
+	return cyanfs_crc32(~0, (uint8_t *)input, sizeof(input));
+}
+
 static inline cyanfs_extent_id cyanfs_map_extent_from(uint64_t b_off)
 {
 	return cyanfs_extent_from(b_off - CYANFS_SUPER_BLOCK_SIZE);
