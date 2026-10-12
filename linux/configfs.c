@@ -316,7 +316,9 @@ static ssize_t cyanfs_backend_cmd_compact_store(struct config_item *item, const 
 	int r;
 	struct cyanfs_backend *backend = to_backend(item);
 
-	cyanfs_super_compact(backend->super);
+	r = cyanfs_super_compact(backend->super);
+	if (r < 0)
+		return r;
 
 	r = cyanfs_backend_wait_tasks(backend);
 	if (r < 0)

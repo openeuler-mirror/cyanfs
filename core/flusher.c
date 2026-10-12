@@ -255,7 +255,7 @@ static void cyanfs_super_flusher_write_finish(struct cyanfs_task_journal_writer 
 	}
 
 	if (compact)
-		cyanfs_super_compact(s);
+		(void)cyanfs_super_compact(s);
 }
 
 cyanfs_status cyanfs_super_flusher_start(struct cyanfs_super *s, uint32_t min_journal_count, int ondisk)

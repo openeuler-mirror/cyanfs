@@ -62,11 +62,19 @@ static void cyanfs_journal_compact_free(struct cyanfs_task_journal_compact *t)
 	cyanfs_free(t);
 }
 
+static void cyanfs_super_compact_fail(struct cyanfs_super *s)
+{
+	cyanfs_write_lock(&s->files_lock);
+	s->flags &= ~CYANFS_SUPER_FLAG_COMPACT_WORKING;
+	__cyanfs_super_mark_error(s);
+	cyanfs_write_unlock(&s->files_lock);
+}
+
 static void cyanfs_journal_compact_error(struct cyanfs_task_journal_compact *t)
 {
 	struct cyanfs_super *s = t->base.super;
 	cyanfs_journal_compact_free(t);
-	cyanfs_super_mark_error(s);
+	cyanfs_super_compact_fail(s);
 }
 
 static void cyanfs_journal_compact_finish(struct cyanfs_task *base, cyanfs_status err)
@@ -319,20 +327,23 @@ err:
 	cyanfs_journal_compact_error(t);
 }
 
-void cyanfs_super_compact(struct cyanfs_super *s)
+cyanfs_status cyanfs_super_compact(struct cyanfs_super *s)
 {
 	struct cyanfs_task_journal_compact *t;
 	struct cyanfs_extent_node *n;
 	cyanfs_extent_id end_id;
+	cyanfs_status err;
 	int i;
 
-	if (!(s->flags & CYANFS_SUPER_FLAG_COMPACT_ENABLED))
-		return;
-
 	cyanfs_write_lock(&s->files_lock);
+	err = __cyanfs_super_ensure_status(s);
+	if (err)
+		goto unlock_out;
+	if (!(s->flags & CYANFS_SUPER_FLAG_COMPACT_ENABLED))
+		goto unlock_out;
 	if (s->flags & CYANFS_SUPER_FLAG_COMPACT_WORKING) {
-		cyanfs_write_unlock(&s->files_lock);
-		return;
+		err = -CYANFS_ERR_BUSY;
+		goto unlock_out;
 	}
 	s->flags |= CYANFS_SUPER_FLAG_COMPACT_WORKING;
 	end_id = s->journal_cursor.extent_id_ondisk;
@@ -381,10 +392,15 @@ void cyanfs_super_compact(struct cyanfs_super *s)
 	if (cyanfs_journal_loader_start(s, &t->loader))
 		cyanfs_super_new_task(s);
 
-	return;
+	return 0;
+
+unlock_out:
+	cyanfs_write_unlock(&s->files_lock);
+	return err;
 
 task_out:
 	cyanfs_journal_compact_free(t);
 err:
-	cyanfs_super_mark_error(s);
+	cyanfs_super_compact_fail(s);
+	return -CYANFS_ERR_NOMEM;
 }

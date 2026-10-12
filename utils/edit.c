@@ -158,8 +158,7 @@ static int do_statfs(struct disk *disk, int argc, const char *argv[])
 
 static int do_compact(struct disk *disk, int argc, const char *argv[])
 {
-	cyanfs_super_compact(disk->super);
-	return 0;
+	return cyanfs_super_compact(disk->super);
 }
 
 static int do_create(struct disk *disk, int argc, const char *argv[])

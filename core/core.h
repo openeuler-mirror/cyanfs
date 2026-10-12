@@ -177,7 +177,12 @@ extern cyanfs_status cyanfs_super_status(struct cyanfs_super *s);
 extern cyanfs_status cyanfs_file_status(struct cyanfs_file *f);
 
 extern cyanfs_status cyanfs_super_flush(struct cyanfs_super *s, int ondisk);
-extern void cyanfs_super_compact(struct cyanfs_super *s);
+/*
+ * 启动一代 compact。未就绪或已有 compact 时返回 BUSY，已有错误时返回 IO。
+ * 返回 0 后，调用方须等待本次加入的 task 完成，再用 cyanfs_super_status()
+ * 获取异步结果。compact 未启用时保持兼容，直接返回 0。
+ */
+extern cyanfs_status cyanfs_super_compact(struct cyanfs_super *s);
 
 extern cyanfs_status cyanfs_super_parse(struct cyanfs_super_header *h, void *super_block);
 extern void cyanfs_super_make(cyanfs_uuid_t uuid, void *super_block);
