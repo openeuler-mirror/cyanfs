@@ -93,6 +93,40 @@ static void check_file_limit(void)
 	assert(!CYANFS_RB_ROOT(&s.files_by_id) && !CYANFS_RB_ROOT(&s.files_by_name));
 }
 
+static void cleanup(struct cyanfs_super *s);
+
+static void check_id_exhaustion(void)
+{
+	struct cyanfs_super s = { 0 };
+	struct cyanfs_file_meta iter = cyanfs_list_init_iter;
+	cyanfs_file_name_t max_name = make_name('m');
+	cyanfs_file_name_t create_name = make_name('c');
+	cyanfs_file_name_t fork_name = make_name('f');
+	cyanfs_file_id_t id;
+
+	CYANFS_RB_INIT(&s.files_by_id);
+	CYANFS_RB_INIT(&s.files_by_name);
+	CYANFS_INIT_LIST_HEAD(&s.journal_head);
+	assert(!cyanfs_init_rwlock(&s.files_lock));
+	assert(!replay_create(&s, ~(cyanfs_file_id_t)0, &max_name));
+	s.flags = CYANFS_SUPER_FLAG_READY;
+
+	id = 123;
+	assert(cyanfs_create(&s, create_name, &id) == -CYANFS_ERR_NOSPACE);
+	assert(id == 123);
+	assert(cyanfs_fork(&s, ~(cyanfs_file_id_t)0, fork_name, &id) == -CYANFS_ERR_NOSPACE);
+	assert(id == 123);
+	assert(s.meta.files == 1 && s.max_file_id == ~(cyanfs_file_id_t)0);
+
+	assert(!cyanfs_list(&s, &iter));
+	assert(iter.id == ~(cyanfs_file_id_t)0);
+	assert(cyanfs_list(&s, &iter) == -CYANFS_ERR_NOENT);
+	assert(iter.id == ~(cyanfs_file_id_t)0);
+
+	cleanup(&s);
+	cyanfs_destroy_rwlock(&s.files_lock);
+}
+
 static void cleanup(struct cyanfs_super *s)
 {
 	struct cyanfs_file *file;
@@ -115,6 +149,7 @@ int main(void)
 	int i;
 
 	check_file_limit();
+	check_id_exhaustion();
 	CYANFS_RB_INIT(&s.files_by_id);
 	CYANFS_RB_INIT(&s.files_by_name);
 	CYANFS_RB_INIT(&s.free_extents);

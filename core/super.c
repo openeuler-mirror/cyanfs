@@ -592,12 +592,16 @@ cyanfs_status cyanfs_list(struct cyanfs_super *s, struct cyanfs_file_meta *iter)
 {
 	cyanfs_status err;
 	struct cyanfs_file tmp, *f;
-	tmp.meta.id = iter->id + 1;
 
 	cyanfs_read_lock(&s->files_lock);
 	err = __cyanfs_super_ensure_status(s);
 	if (err)
 		goto unlock;
+	if (iter->id == ~(cyanfs_file_id_t)0) {
+		err = -CYANFS_ERR_NOENT;
+		goto unlock;
+	}
+	tmp.meta.id = iter->id + 1;
 	f = CYANFS_RB_NFIND(cyanfs_files_id_rb, &s->files_by_id, &tmp);
 	if (f) {
 		*iter = f->meta;
@@ -693,7 +697,7 @@ cyanfs_status cyanfs_create(struct cyanfs_super *s, cyanfs_file_name_t name, cya
 	err = __cyanfs_super_ensure_status(s);
 	if (err)
 		goto unlock;
-	if (s->meta.files >= CYANFS_SUPER_MAX_FILES) {
+	if (s->meta.files >= CYANFS_SUPER_MAX_FILES || s->max_file_id == ~(cyanfs_file_id_t)0) {
 		err = -CYANFS_ERR_NOSPACE;
 		goto unlock;
 	}
@@ -750,7 +754,7 @@ cyanfs_status cyanfs_fork(struct cyanfs_super *s, cyanfs_file_id_t from, cyanfs_
 	err = __cyanfs_super_ensure_status(s);
 	if (err)
 		goto unlock;
-	if (s->meta.files >= CYANFS_SUPER_MAX_FILES) {
+	if (s->meta.files >= CYANFS_SUPER_MAX_FILES || s->max_file_id == ~(cyanfs_file_id_t)0) {
 		err = -CYANFS_ERR_NOSPACE;
 		goto unlock;
 	}
