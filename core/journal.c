@@ -311,6 +311,8 @@ static void cyanfs_journal_loader_parser_page(struct cyanfs_task *base, cyanfs_s
 	}
 
 done:
+	if (t->end_id != (cyanfs_extent_id)cyanfs_extent_id_invalid && !follow_end)
+		goto error;
 	cyanfs_journal_loader_end(t, 0);
 	return;
 
