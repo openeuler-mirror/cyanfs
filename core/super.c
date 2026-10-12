@@ -43,12 +43,16 @@ struct cyanfs_extent_node *__cyanfs_super_find_extent(struct cyanfs_super *s, cy
 	return CYANFS_RB_FIND(cyanfs_backend_extents_rb, &s->free_extents, &cmp);
 }
 
-void __cyanfs_file_map_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n, cyanfs_extent_id f_id)
+cyanfs_status __cyanfs_file_map_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n, cyanfs_extent_id f_id)
 {
 	struct cyanfs_super *s = f->super;
+
+	if (__cyanfs_file_find_extent(f, cyanfs_extent_begin(f_id)))
+		return -CYANFS_ERR_INVAL;
 	n->v.file = f_id;
 	__cyanfs_extent_super_to_file(s, f, n, &s->free_extents, &f->extents);
 	n->v.map = 1;
+	return 0;
 }
 
 void __cyanfs_file_unmap_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n)
@@ -108,7 +112,8 @@ struct cyanfs_extent_node *__cyanfs_file_alloc_extent(struct cyanfs_file *f, uin
 	n = __cyanfs_super_find_nearly_extent(s, id_from);
 	if (!n)
 		goto out;
-	__cyanfs_file_map_extent(f, n, id);
+	if (__cyanfs_file_map_extent(f, n, id))
+		n = NULL;
 
 out:
 	return n;
@@ -124,9 +129,7 @@ cyanfs_status __cyanfs_file_bind_extent(struct cyanfs_file *f, cyanfs_extent_id 
 	n = __cyanfs_super_find_extent(s, b_id);
 	if (!n)
 		return -CYANFS_ERR_INVAL;
-	__cyanfs_file_map_extent(f, n, f_id);
-
-	return 0;
+	return __cyanfs_file_map_extent(f, n, f_id);
 }
 
 cyanfs_status __cyanfs_file_unbind_extent(struct cyanfs_file *f, cyanfs_extent_id f_id)

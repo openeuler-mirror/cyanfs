@@ -66,6 +66,18 @@ static cyanfs_status replay_delete(struct cyanfs_super *s, cyanfs_file_id_t id)
 	return __cyanfs_super_journal_replay(s, &journal);
 }
 
+static cyanfs_status replay_bind(struct cyanfs_super *s, cyanfs_file_id_t id, cyanfs_extent_id file,
+			     cyanfs_extent_id backend)
+{
+	struct cyanfs_journal_entry journal = { 0 };
+
+	journal.type = CYANFS_JOURNAL_BIND;
+	journal.bind.id = id;
+	journal.bind.file = file;
+	journal.bind.backend = backend;
+	return __cyanfs_super_journal_replay(s, &journal);
+}
+
 static void cleanup(struct cyanfs_super *s)
 {
 	struct cyanfs_file *file;
@@ -80,13 +92,22 @@ static void cleanup(struct cyanfs_super *s)
 int main(void)
 {
 	struct cyanfs_super s = { 0 };
+	struct cyanfs_extent_node extents[2] = { 0 };
 	struct cyanfs_file *parent, *child;
 	cyanfs_file_name_t parent_name = make_name('p');
 	cyanfs_file_name_t child_name = make_name('c');
 	cyanfs_file_name_t other_name = make_name('o');
+	int i;
 
 	CYANFS_RB_INIT(&s.files_by_id);
 	CYANFS_RB_INIT(&s.files_by_name);
+	CYANFS_RB_INIT(&s.free_extents);
+	CYANFS_RB_INIT(&s.unused_extents);
+	for (i = 0; i < 2; ++i) {
+		extents[i].v.backend = i;
+		assert(!CYANFS_RB_INSERT(cyanfs_backend_extents_rb, &s.free_extents, &extents[i]));
+	}
+	s.meta.total_extents = s.meta.free_extents = 2;
 
 	assert(replay_create(&s, 0, &parent_name) == -CYANFS_ERR_INVAL);
 	assert(!s.meta.files && !s.max_file_id);
@@ -99,6 +120,8 @@ int main(void)
 	assert(replay_create(&s, 10, &other_name) == -CYANFS_ERR_INVAL);
 	assert(s.meta.files == 1 && s.max_file_id == 10);
 	assert(find_id(&s, 10) == parent && !find_name(&s, other_name));
+	assert(!replay_truncate(&s, 10, 2 * CYANFS_EXTENT_SIZE));
+	assert(parent->meta.size == 2 * CYANFS_EXTENT_SIZE);
 
 	assert(replay_fork(&s, 0, 10, &child_name) == -CYANFS_ERR_INVAL);
 	assert(replay_fork(&s, 9, 10, &child_name) == -CYANFS_ERR_INVAL);
@@ -112,6 +135,16 @@ int main(void)
 	assert(child->parent == parent && child->meta.parent_id == 10);
 	assert(s.meta.files == 2 && s.max_file_id == 11 && parent->meta.children == 1);
 
+	assert(!replay_bind(&s, 11, 0, 0));
+	assert(child->meta.extents == 1 && s.meta.data_extents == 1 && s.meta.free_extents == 1);
+	assert(__cyanfs_file_find_extent(child, 0) == &extents[0]);
+	assert(__cyanfs_super_find_extent(&s, 0) == NULL);
+	assert(__cyanfs_super_find_extent(&s, 1) == &extents[1]);
+	assert(replay_bind(&s, 11, 0, 1) == -CYANFS_ERR_INVAL);
+	assert(child->meta.extents == 1 && s.meta.data_extents == 1 && s.meta.free_extents == 1);
+	assert(__cyanfs_file_find_extent(child, 0) == &extents[0]);
+	assert(__cyanfs_super_find_extent(&s, 1) == &extents[1]);
+
 	assert(replay_fork(&s, 11, 10, &other_name) == -CYANFS_ERR_INVAL);
 	assert(replay_fork(&s, 12, 10, &child_name) == -CYANFS_ERR_INVAL);
 	assert(s.meta.files == 2 && s.max_file_id == 11 && parent->meta.children == 1);
@@ -120,11 +153,14 @@ int main(void)
 
 	assert(replay_truncate(&s, 10, CYANFS_FILE_ALIGN_SIZE) == -CYANFS_ERR_INVAL);
 	assert(replay_delete(&s, 10) == -CYANFS_ERR_INVAL);
-	assert(s.meta.files == 2 && !parent->meta.size && parent->meta.children == 1);
+	assert(s.meta.files == 2 && parent->meta.size == 2 * CYANFS_EXTENT_SIZE && parent->meta.children == 1);
 	assert(child->parent == parent && find_id(&s, 10) == parent && find_id(&s, 11) == child);
 
 	assert(!replay_delete(&s, 11));
 	assert(s.meta.files == 1 && !parent->meta.children && !find_id(&s, 11));
+	assert(s.meta.data_extents == 0 && s.meta.free_extents == 2);
+	assert(__cyanfs_super_find_extent(&s, 0) == &extents[0]);
+	assert(__cyanfs_super_find_extent(&s, 1) == &extents[1]);
 	assert(!find_name(&s, child_name));
 	assert(!replay_truncate(&s, 10, CYANFS_FILE_ALIGN_SIZE));
 	assert(parent->meta.size == CYANFS_FILE_ALIGN_SIZE);

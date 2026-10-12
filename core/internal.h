@@ -311,14 +311,14 @@ static inline void __cyanfs_extent_super_to_file(struct cyanfs_super *s, struct 
 {
 	__cyanfs_super_stat_add(s, from, -1);
 	CYANFS_RB_REMOVE(cyanfs_backend_extents_rb, from, n);
-	CYANFS_RB_INSERT(cyanfs_file_extents_rb, to, n);
+	CYANFS_BUG_ON(CYANFS_RB_INSERT(cyanfs_file_extents_rb, to, n));
 	++s->meta.data_extents;
 	++f->meta.extents;
 }
 
 struct cyanfs_extent_node *__cyanfs_super_find_nearly_extent(struct cyanfs_super *s, cyanfs_extent_id id_from);
 struct cyanfs_extent_node *__cyanfs_super_find_extent(struct cyanfs_super *s, cyanfs_extent_id id);
-void __cyanfs_file_map_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n, cyanfs_extent_id f_id);
+cyanfs_status __cyanfs_file_map_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n, cyanfs_extent_id f_id);
 void __cyanfs_file_unmap_extent(struct cyanfs_file *f, struct cyanfs_extent_node *n);
 struct cyanfs_extent_node *__cyanfs_file_find_extent(struct cyanfs_file *f, uint64_t f_off);
 struct cyanfs_extent_node *__cyanfs_file_find_extent_follow(struct cyanfs_file *f, uint64_t f_off);
