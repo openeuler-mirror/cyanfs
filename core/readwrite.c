@@ -241,20 +241,25 @@ cyanfs_status cyanfs_discard(struct cyanfs_file *f, void *ctx, uint64_t f_off, u
 		void (*unlocker)(struct cyanfs_rwlock * lock);
 		uint64_t l = cyanfs_map_extent_space(f_off, len);
 
-		if (cyanfs_extent_begin(cyanfs_extent_from(f_off)) != f_off || l < CYANFS_EXTENT_SIZE)
-			goto handle;
-
+		err = 0;
 		cyanfs_read_lock(&s->files_lock);
 		unlocker = cyanfs_read_unlock;
 
 	upgraded:
+		err = __cyanfs_super_ensure_status(s);
+		if (err)
+			goto unlock_out;
+		if (cyanfs_extent_begin(cyanfs_extent_from(f_off)) != f_off || l < CYANFS_EXTENT_SIZE)
+			goto unlock_out;
+
 		p = __cyanfs_file_find_extent_follow(f->parent, f_off);
 		if (p)
 			goto unlock_out;
 		n = __cyanfs_file_find_extent(f, f_off);
 		if (!n)
 			goto unlock_out;
-		if (n->v.error || __cyanfs_super_ensure_status(s)) {
+		if (n->v.error) {
+			err = -CYANFS_ERR_IO;
 			goto unlock_out;
 		}
 		if (n->v.pending) {
@@ -285,8 +290,9 @@ cyanfs_status cyanfs_discard(struct cyanfs_file *f, void *ctx, uint64_t f_off, u
 
 	unlock_out:
 		unlocker(&s->files_lock);
+		if (err)
+			goto out;
 
-	handle:
 		err = handler(map, 0, l, ctx);
 
 	out:
