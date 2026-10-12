@@ -171,9 +171,21 @@ static cyanfs_status count_mapping(cyanfs_map_type_t type, uint64_t b_off, uint6
 	return 0;
 }
 
+static cyanfs_status count_requeue(cyanfs_map_type_t type, uint64_t b_off, uint64_t len, void *ctx)
+{
+	int *calls = ctx;
+
+	(void)b_off;
+	(void)len;
+	assert(type == CYANFS_MAP_REQUEUE);
+	++*calls;
+	return 0;
+}
+
 static void check_write_error_after_relock(struct cyanfs_super *s, cyanfs_file_id_t parent)
 {
 	struct cyanfs_file *parent_file, *child_file;
+	struct cyanfs_extent_node *source;
 	cyanfs_file_id_t child;
 	uint32_t data_extents, free_extents;
 	int calls = 0, live_before;
@@ -185,6 +197,8 @@ static void check_write_error_after_relock(struct cyanfs_super *s, cyanfs_file_i
 	assert(calls == 1);
 	cyanfs_close(parent_file);
 	drain(s, 0);
+	source = __cyanfs_file_find_extent(parent_file, 0);
+	assert(source);
 
 	assert(!cyanfs_fork(s, parent, make_name('w'), &child));
 	drain(s, 0);
@@ -193,6 +207,21 @@ static void check_write_error_after_relock(struct cyanfs_super *s, cyanfs_file_i
 	data_extents = s->meta.data_extents;
 	free_extents = s->meta.free_extents;
 	live_before = live;
+
+	source->v.error = 1;
+	calls = 0;
+	assert(cyanfs_write(child_file, &calls, 0, CYANFS_FILE_ALIGN_SIZE, count_mapping) == -CYANFS_ERR_IO);
+	assert(!calls && live == live_before);
+	assert(child_file->meta.extents == 0 && !cyanfs_super_get_task(s));
+	source->v.error = 0;
+
+	source->v.pending = 1;
+	calls = 0;
+	assert(!cyanfs_write(child_file, &calls, 0, CYANFS_FILE_ALIGN_SIZE, count_requeue));
+	assert(calls == 1 && live == live_before);
+	assert(child_file->meta.extents == 0 && !cyanfs_super_get_task(s));
+	source->v.pending = 0;
+
 	calls = 0;
 	error_on_allocation = s;
 	assert(cyanfs_write(child_file, &calls, 0, CYANFS_FILE_ALIGN_SIZE, count_mapping) == -CYANFS_ERR_IO);

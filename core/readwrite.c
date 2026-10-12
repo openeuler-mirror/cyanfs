@@ -118,8 +118,17 @@ cyanfs_status cyanfs_write(struct cyanfs_file *f, void *ctx, uint64_t f_off, uin
 		if (n)
 			goto mapped;
 		p = __cyanfs_file_find_extent_follow(f->parent, f_off);
-		if (p)
+		if (p) {
+			if (p->v.error) {
+				err = -CYANFS_ERR_IO;
+				goto unlock_out;
+			}
+			if (p->v.pending) {
+				extent = p->v;
+				goto unlock_out;
+			}
 			parent_b_id = p->v.backend;
+		}
 
 		unlocker(&s->files_lock);
 
