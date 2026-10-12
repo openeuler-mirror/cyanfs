@@ -60,9 +60,8 @@
 
 #define CYANFS_RB_SET(elm, parent, field)                                                                              \
 	do {                                                                                                           \
-		CYANFS_RB_PARENT_SET(elm, field, parent);                                                              \
+		(elm)->field.rbe_parent = (typeof(elm))((uint64_t)(parent) | CYANFS_RB_RED);                           \
 		CYANFS_RB_LEFT(elm, field) = CYANFS_RB_RIGHT(elm, field) = NULL;                                       \
-		CYANFS_RB_COLOR_SET(elm, field, CYANFS_RB_RED);                                                        \
 	} while (0)
 
 #define CYANFS_RB_SET_BLACKRED(black, red, field)                                                                      \
