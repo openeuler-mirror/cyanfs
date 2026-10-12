@@ -379,3 +379,60 @@ cyanfs_status cyanfs_seek_extent(struct cyanfs_file *f, uint64_t *f_off)
 
 	return r;
 }
+
+cyanfs_status cyanfs_seek_data(struct cyanfs_file *f, uint64_t *f_off)
+{
+	struct cyanfs_super *s = f->super;
+	struct cyanfs_file *ancestor;
+	struct cyanfs_extent_node tmp, *n;
+	cyanfs_extent_id first = cyanfs_extent_id_invalid;
+	uint64_t visible_size;
+	cyanfs_status r;
+
+	if (f->open_type != CYANFS_FILE_READONLY)
+		return -CYANFS_ERR_INVAL;
+	if (*f_off >= f->meta.size)
+		return -CYANFS_ERR_NOENT;
+
+	tmp.v.file = cyanfs_extent_from(*f_off);
+	visible_size = f->meta.size;
+	cyanfs_read_lock(&s->files_lock);
+	r = __cyanfs_super_ensure_status(s);
+	if (r)
+		goto unlock;
+	for (ancestor = f; ancestor; ancestor = ancestor->parent) {
+		uint64_t begin;
+
+		if (ancestor->meta.size < visible_size)
+			visible_size = ancestor->meta.size;
+		if (cyanfs_extent_begin(tmp.v.file) >= visible_size)
+			break;
+		n = CYANFS_RB_NFIND(cyanfs_file_extents_rb, &ancestor->extents, &tmp);
+		if (!n)
+			continue;
+		begin = cyanfs_extent_begin(n->v.file);
+		if (begin < visible_size &&
+		    (first == (cyanfs_extent_id)cyanfs_extent_id_invalid || n->v.file < first))
+			first = n->v.file;
+	}
+	if (first == (cyanfs_extent_id)cyanfs_extent_id_invalid) {
+		r = -CYANFS_ERR_NOENT;
+		goto unlock;
+	}
+
+	n = __cyanfs_file_find_extent_follow(f, cyanfs_extent_begin(first));
+	CYANFS_DEBUG_BUG_ON(!n);
+	if (n->v.error) {
+		r = -CYANFS_ERR_IO;
+	} else {
+		uint64_t begin = cyanfs_extent_begin(first);
+
+		if (begin > *f_off)
+			*f_off = begin;
+		r = 0;
+	}
+
+unlock:
+	cyanfs_read_unlock(&s->files_lock);
+	return r;
+}

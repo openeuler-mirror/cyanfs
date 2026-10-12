@@ -87,6 +87,7 @@ extern cyanfs_status cyanfs_flush(struct cyanfs_file *f, cyanfs_map_type_t *type
 extern cyanfs_status cyanfs_requeue(struct cyanfs_file *f, void *ctx, cyanfs_ctx_fn fn);
 extern uint64_t cyanfs_size(struct cyanfs_file *f);
 extern cyanfs_status cyanfs_seek_extent(struct cyanfs_file *f, uint64_t *f_off);
+extern cyanfs_status cyanfs_seek_data(struct cyanfs_file *f, uint64_t *f_off);
 
 typedef enum {
 	CYANFS_TASK_NOP,
