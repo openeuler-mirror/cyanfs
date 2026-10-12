@@ -256,6 +256,7 @@ int main(void)
 	reset();
 	s = cyanfs_super_open(DISK_SIZE, 0, 0);
 	assert(s && rwlocks == 1 && mutexes == 1);
+	assert(!cyanfs_super_is_ready(s) && cyanfs_super_status(s) == -CYANFS_ERR_BUSY);
 	total_allocations = allocation_count;
 	drain(s, 0);
 	assert(cyanfs_super_is_ready(s) && !cyanfs_super_status(s));
@@ -275,7 +276,13 @@ int main(void)
 		s = cyanfs_super_open(DISK_SIZE, 0, 0);
 		assert(s && rwlocks == 1 && mutexes == 1);
 		drain(s, i & 1);
-		assert((i & 1) ? cyanfs_super_status(s) != 0 : cyanfs_super_is_ready(s));
+		if (i & 1) {
+			assert(!cyanfs_super_is_ready(s));
+			assert(cyanfs_super_status(s) == -CYANFS_ERR_IO);
+		} else {
+			assert(cyanfs_super_is_ready(s));
+			assert(!cyanfs_super_status(s));
+		}
 		cyanfs_super_close(s);
 		assert(destroys == 2);
 		reset();

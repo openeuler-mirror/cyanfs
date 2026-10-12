@@ -209,10 +209,10 @@ struct cyanfs_super {
 
 static inline cyanfs_status __cyanfs_super_ensure_status(struct cyanfs_super *s)
 {
-	if (!(s->flags & CYANFS_SUPER_FLAG_READY))
-		return -CYANFS_ERR_BUSY;
 	if (s->flags & CYANFS_SUPER_FLAG_ERROR)
 		return -CYANFS_ERR_IO;
+	if (!(s->flags & CYANFS_SUPER_FLAG_READY))
+		return -CYANFS_ERR_BUSY;
 	return 0;
 }
 
