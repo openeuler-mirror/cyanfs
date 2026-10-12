@@ -165,6 +165,52 @@ static void cyanfs_journal_compact_loader_error(struct cyanfs_task_journal_loade
 	cyanfs_journal_compact_error(t);
 }
 
+static int cyanfs_journal_compact_marker_name(struct cyanfs_super *s, cyanfs_file_name_t *name)
+{
+	struct cyanfs_file file = { 0 };
+	uint32_t i;
+
+	for (i = 0; i <= CYANFS_SUPER_MAX_FILES; ++i) {
+		*name = (cyanfs_file_name_t){ 0 };
+		name->data[0] = 0xff;
+		name->data[1] = i / 255 + 1;
+		name->data[2] = i % 255 + 1;
+		file.meta.name = *name;
+		if (!CYANFS_RB_FIND(cyanfs_files_name_rb, &s->files_by_name, &file))
+			return 0;
+	}
+	return 1;
+}
+
+static int cyanfs_journal_compact_preserve_max_file_id(struct cyanfs_task_journal_compact *t,
+							cyanfs_file_id_t max_live_id,
+							cyanfs_journal_seq_t *count)
+{
+	struct cyanfs_journal_entry *create, *delete;
+	cyanfs_file_name_t name;
+
+	if (t->compact.max_file_id <= max_live_id)
+		return 0;
+	if (cyanfs_journal_compact_marker_name(&t->compact, &name))
+		return 1;
+
+	create = cyanfs_journal_alloc(CYANFS_JOURNAL_CREATE);
+	if (!create)
+		return 1;
+	*create->create.name = name;
+	create->create.id = t->compact.max_file_id;
+	cyanfs_list_add_tail(&create->list, &t->writer.head);
+	if (cyanfs_journal_compact_count_entry(count))
+		return 1;
+
+	delete = cyanfs_journal_alloc(CYANFS_JOURNAL_DELETE);
+	if (!delete)
+		return 1;
+	delete->delete.id = t->compact.max_file_id;
+	cyanfs_list_add_tail(&delete->list, &t->writer.head);
+	return cyanfs_journal_compact_count_entry(count);
+}
+
 static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_loader *loader)
 {
 	struct cyanfs_task_journal_compact *t = cyanfs_container_of(loader, struct cyanfs_task_journal_compact, loader);
@@ -173,11 +219,13 @@ static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_load
 	struct cyanfs_extent_node *n;
 	struct cyanfs_journal_entry *j;
 	cyanfs_journal_seq_t count = 0;
+	cyanfs_file_id_t max_live_id = 0;
 
 	cyanfs_journal_writer_init(&t->writer);
 	CYANFS_RB_FOREACH(f, cyanfs_files_id_rb, &t->compact.files_by_id)
 	{
 		int truncate;
+		max_live_id = f->meta.id;
 		if (f->parent) {
 			j = cyanfs_journal_alloc(CYANFS_JOURNAL_FORK);
 			if (!j)
@@ -223,6 +271,8 @@ static void cyanfs_journal_compact_loader_finish(struct cyanfs_task_journal_load
 				goto err;
 		}
 	}
+	if (cyanfs_journal_compact_preserve_max_file_id(t, max_live_id, &count))
+		goto err;
 
 	t->header = loader->header;
 	if (count > t->compact.journal_cursor.seq) {
