@@ -239,8 +239,15 @@ static inline void cyanfs_task_init(struct cyanfs_super *s, struct cyanfs_task *
 
 static inline void cyanfs_super_new_task(struct cyanfs_super *s)
 {
-	if (s->new_task)
-		s->new_task(s->ctx);
+	cyanfs_ctx_fn fn;
+	void *ctx;
+
+	cyanfs_lock(&s->task_lock);
+	fn = s->new_task;
+	ctx = s->ctx;
+	cyanfs_unlock(&s->task_lock);
+	if (fn)
+		fn(ctx);
 }
 
 static inline int cyanfs_super_task_add_head(struct cyanfs_task *task)

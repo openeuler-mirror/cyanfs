@@ -334,13 +334,20 @@ cyanfs_status __cyanfs_super_journal_replay(struct cyanfs_super *s, struct cyanf
 
 void cyanfs_super_set_new_task_callback(struct cyanfs_super *s, void *ctx, cyanfs_ctx_fn fn)
 {
+	cyanfs_lock(&s->task_lock);
 	s->ctx = ctx;
 	s->new_task = fn;
+	cyanfs_unlock(&s->task_lock);
 }
 
 int cyanfs_super_is_ready(struct cyanfs_super *s)
 {
-	return s->flags & CYANFS_SUPER_FLAG_READY;
+	int ready;
+
+	cyanfs_read_lock(&s->files_lock);
+	ready = !!(s->flags & CYANFS_SUPER_FLAG_READY);
+	cyanfs_read_unlock(&s->files_lock);
+	return ready;
 }
 
 cyanfs_status cyanfs_super_status(struct cyanfs_super *s)
@@ -519,8 +526,12 @@ void cyanfs_super_close(struct cyanfs_super *s)
 	struct cyanfs_extent_node *n, *next_n;
 	struct cyanfs_list_head *p, *tmp;
 
-	cyanfs_free(s->journal_cursor.page);
 	CYANFS_BUG_ON(!cyanfs_list_empty(&s->task_head) || s->active_tasks);
+	CYANFS_RB_FOREACH(f, cyanfs_files_id_rb, &s->files_by_id)
+	{
+		CYANFS_BUG_ON(f->open_type != CYANFS_FILE_CLOSED);
+	}
+	cyanfs_free(s->journal_cursor.page);
 	cyanfs_list_for_each_safe(p, tmp, &s->journal_head)
 	{
 		struct cyanfs_journal_entry *j = cyanfs_container_of(p, struct cyanfs_journal_entry, list);

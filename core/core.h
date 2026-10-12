@@ -157,6 +157,16 @@ struct cyanfs_super_header {
 	cyanfs_journal_seq_t journal_seq;
 };
 
+/*
+ * 每个 super 只能由一个串行 executor 消费 task。每次 get_task() 返回非空后，
+ * executor 必须且只能调用一次 cyanfs_super_task_done()，不能直接调用 task->done。
+ * new-task callback 只能在 executor 静止时注册或清除；清除前须先停止并等待
+ * executor，且 callback 的 ctx 必须存活到该时刻。
+ *
+ * cyanfs_close() 前须等待该文件的映射 handler 和 requeue callback 全部结束。
+ * cyanfs_super_close() 前须关闭全部文件、停止 executor 并确保 callback 不再进入、
+ * 排空并完成全部 task，且不得再有线程调用此 super 的任何接口。
+ */
 extern struct cyanfs_super *cyanfs_super_open(uint64_t size, int discard, int compact);
 extern void cyanfs_super_close(struct cyanfs_super *s);
 extern struct cyanfs_task *cyanfs_super_get_task(struct cyanfs_super *s);
