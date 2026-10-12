@@ -655,7 +655,7 @@ unlock:
 
 cyanfs_status cyanfs_create(struct cyanfs_super *s, cyanfs_file_name_t name, cyanfs_file_id_t *id)
 {
-	cyanfs_status err = -CYANFS_ERR_NOMEM;
+	cyanfs_status err;
 	struct cyanfs_file *f = NULL;
 	struct cyanfs_journal_entry *j = NULL;
 
@@ -665,11 +665,13 @@ cyanfs_status cyanfs_create(struct cyanfs_super *s, cyanfs_file_name_t name, cya
 
 	f = cyanfs_malloc(sizeof(struct cyanfs_file));
 	if (!f)
-		goto out;
+		return -CYANFS_ERR_NOMEM;
 
 	j = cyanfs_journal_alloc(CYANFS_JOURNAL_CREATE);
-	if (!j)
-		goto out;
+	if (!j) {
+		cyanfs_free(f);
+		return -CYANFS_ERR_NOMEM;
+	}
 
 	cyanfs_write_lock(&s->files_lock);
 	err = __cyanfs_super_ensure_status(s);
@@ -695,7 +697,6 @@ unlock:
 
 	cyanfs_super_flush_new_journal(s);
 
-out:
 	if (err) {
 		if (j)
 			cyanfs_journal_free(j);
@@ -709,7 +710,7 @@ out:
 cyanfs_status cyanfs_fork(struct cyanfs_super *s, cyanfs_file_id_t from, cyanfs_file_name_t name_to,
 			  cyanfs_file_id_t *id_to)
 {
-	cyanfs_status err = -CYANFS_ERR_NOMEM;
+	cyanfs_status err;
 	struct cyanfs_file *f = NULL, *p;
 	struct cyanfs_journal_entry *j = NULL;
 
@@ -719,11 +720,13 @@ cyanfs_status cyanfs_fork(struct cyanfs_super *s, cyanfs_file_id_t from, cyanfs_
 
 	f = cyanfs_malloc(sizeof(struct cyanfs_file));
 	if (!f)
-		goto out;
+		return -CYANFS_ERR_NOMEM;
 
 	j = cyanfs_journal_alloc(CYANFS_JOURNAL_FORK);
-	if (!j)
-		goto out;
+	if (!j) {
+		cyanfs_free(f);
+		return -CYANFS_ERR_NOMEM;
+	}
 
 	cyanfs_write_lock(&s->files_lock);
 	err = __cyanfs_super_ensure_status(s);
@@ -755,7 +758,6 @@ unlock:
 
 	cyanfs_super_flush_new_journal(s);
 
-out:
 	if (err) {
 		if (j)
 			cyanfs_journal_free(j);
